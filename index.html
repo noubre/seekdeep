@@ -64,7 +64,7 @@
       max-width: 90%;
     }
     
-    .message-you {
+    .message-current-peer {
       background-color: #4A6BBF;
       align-self: flex-end;
       margin-left: auto;
@@ -286,6 +286,27 @@
       font-size: 14px;
     }
     
+    .mode-toggle {
+      display: flex;
+      align-items: center;
+      margin-top: 8px;
+      padding: 4px 0;
+    }
+    
+    .mode-toggle label {
+      margin-right: 10px;
+      white-space: nowrap;
+    }
+    
+    .mode-toggle select {
+      background-color: #343F54;
+      border: none;
+      color: #d0d0d0;
+      padding: 4px 8px;
+      border-radius: 3px;
+      font-size: 12px;
+    }
+    
     .hidden {
       display: none !important;
     }
@@ -408,6 +429,14 @@
     <label for="topic-key">Join a friend's chat:</label>
     <input type="text" id="topic-key" placeholder="Enter topic key..." />
     <button id="join-button">Join Chat</button>
+    
+    <div class="mode-toggle">
+      <label for="chat-mode">Chat Mode:</label>
+      <select id="chat-mode">
+        <option value="collaborative">Collaborative (Shared Chat)</option>
+        <option value="private">Private (Separate Chats)</option>
+      </select>
+    </div>
   </div>
   
   <!-- Chat container with active users and messages -->
