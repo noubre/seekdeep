@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body {
+      background-color: #1F2430;
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      display: flex;
+      flex-direction: column;
+      margin: 0;
+      padding: 0;
+      height: 100vh;
+      overflow: hidden;
+    }
+    
+    #bar {
+      -webkit-app-region: drag;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 8px;
+      background-color: #171C27;
+    }
+    
+    #bar pear-ctrl {
+      -webkit-app-region: no-drag;
+    }
+    
+    #chat-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      margin: 4px;
+      border-radius: 4px;
+      background-color: #232834;
+    }
+    
+    #chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 10px;
+      font-size: 14px;
+    }
+    
+    .message {
+      margin-bottom: 12px;
+      padding: 8px 12px;
+      border-radius: 12px;
+      max-width: 85%;
+      word-wrap: break-word;
+    }
+    
+    .message-system {
+      background-color: #343952;
+      color: #a0a8bd;
+      font-style: italic;
+      text-align: center;
+      margin: 5px auto;
+      padding: 5px 10px;
+      border-radius: 8px;
+      max-width: 90%;
+    }
+    
+    .message-you {
+      background-color: #4A6BBF;
+      align-self: flex-end;
+      margin-left: auto;
+      border-bottom-right-radius: 0;
+    }
+    
+    .message-assistant {
+      background-color: #3B4252;
+      align-self: flex-start;
+      border-bottom-left-radius: 0;
+      border-left: 3px solid #81A1C1;
+    }
+    
+    .message-thinking {
+      background-color: #2E3746;
+      font-style: italic;
+      color: #a0a8bd;
+      border-left: 3px solid #A3BE8C;
+    }
+    
+    .message-peer {
+      align-self: flex-start;
+      border-bottom-left-radius: 0;
+    }
+    
+    /* Peer color classes - will be assigned dynamically */
+    .peer-color-1 { background-color: #5E81AC; border-left: 3px solid #88C0D0; }
+    .peer-color-2 { background-color: #8FBCBB; border-left: 3px solid #A3BE8C; }
+    .peer-color-3 { background-color: #B48EAD; border-left: 3px solid #D08770; }
+    .peer-color-4 { background-color: #BF616A; border-left: 3px solid #EBCB8B; }
+    .peer-color-5 { background-color: #A3BE8C; border-left: 3px solid #5E81AC; }
+    
+    .message-header {
+      font-weight: bold;
+      margin-bottom: 5px;
+      font-size: 0.9em;
+    }
+    
+    .thinking-section {
+      background-color: #2D3343;
+      padding: 10px;
+      border-radius: 8px;
+      margin: 10px 0;
+      position: relative;
+    }
+    
+    .thinking-header {
+      position: absolute;
+      top: -10px;
+      left: 10px;
+      background-color: #81A1C1;
+      padding: 2px 8px;
+      border-radius: 8px;
+      font-size: 0.8em;
+      color: #1F2430;
+    }
+    
+    #active-users {
+      display: flex;
+      padding: 5px 10px;
+      background-color: #292E39;
+      border-radius: 4px 4px 0 0;
+      overflow-x: auto;
+      white-space: nowrap;
+    }
+    
+    .user-chip {
+      display: inline-block;
+      margin-right: 5px;
+      padding: 3px 8px;
+      border-radius: 12px;
+      font-size: 0.8em;
+      color: white;
+    }
+    
+    textarea {
+      background-color: #232834;
+      color: #d0d0d0;
+      border: none;
+      resize: none;
+      padding: 10px;
+      font-size: 14px;
+      margin: 4px;
+      border-radius: 4px;
+    }
+    
+    form {
+      display: flex;
+      flex-direction: column;
+      margin: 0 4px 4px 4px;
+    }
+    
+    form textarea {
+      height: 60px;
+      margin: 0 0 4px 0;
+    }
+    
+    input {
+      background-color: #343F54;
+      border: none;
+      color: #d0d0d0;
+      padding: 6px 10px;
+      border-radius: 3px;
+      margin-left: 5px;
+    }
+    
+    input[type="submit"], button {
+      background-color: #5A74CA;
+      cursor: pointer;
+    }
+    
+    input[type="submit"]:hover, button:hover {
+      background-color: #6D84D7;
+    }
+    
+    #join-section {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      padding: 4px 8px;
+      background-color: #171C27;
+      margin: 0 4px;
+      border-radius: 4px;
+    }
+    
+    #join-section input[type="text"] {
+      flex: 1;
+      margin-left: 5px;
+      margin-right: 5px;
+    }
+    
+    #join-section label {
+      font-size: 14px;
+    }
+    
+    .hidden {
+      display: none !important;
+    }
+    
+    /* Markdown styles */
+    .markdown-content {
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      line-height: 1.6;
+    }
+    
+    .markdown-content h1, 
+    .markdown-content h2, 
+    .markdown-content h3, 
+    .markdown-content h4, 
+    .markdown-content h5, 
+    .markdown-content h6 {
+      margin-top: 16px;
+      margin-bottom: 10px;
+      font-weight: 600;
+      line-height: 1.25;
+      color: #d8dee9;
+    }
+    
+    .markdown-content h1 { font-size: 1.5em; }
+    .markdown-content h2 { font-size: 1.3em; }
+    .markdown-content h3 { font-size: 1.2em; }
+    .markdown-content h4 { font-size: 1.1em; }
+    
+    .markdown-content p {
+      margin-top: 0;
+      margin-bottom: 10px;
+    }
+    
+    .markdown-content code {
+      font-family: SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+      background-color: rgba(0, 0, 0, 0.2);
+      padding: 2px 4px;
+      border-radius: 3px;
+      font-size: 0.9em;
+    }
+    
+    .markdown-content pre {
+      background-color: rgba(0, 0, 0, 0.3);
+      border-radius: 6px;
+      padding: 12px;
+      overflow: auto;
+      margin: 8px 0;
+    }
+    
+    .markdown-content pre code {
+      background-color: transparent;
+      padding: 0;
+      white-space: pre;
+    }
+    
+    .markdown-content ul, 
+    .markdown-content ol {
+      margin-top: 0;
+      margin-bottom: 10px;
+      padding-left: 20px;
+    }
+    
+    .markdown-content blockquote {
+      margin: 8px 0;
+      padding: 0 10px;
+      border-left: 3px solid #81A1C1;
+      color: #c9d1d9;
+    }
+    
+    .markdown-content a {
+      color: #88C0D0;
+      text-decoration: none;
+    }
+    
+    .markdown-content a:hover {
+      text-decoration: underline;
+    }
+    
+    .markdown-content table {
+      border-collapse: collapse;
+      margin: 15px 0;
+      overflow: auto;
+      width: auto;
+    }
+    
+    .markdown-content table th,
+    .markdown-content table td {
+      border: 1px solid #3B4252;
+      padding: 6px 13px;
+    }
+    
+    .markdown-content table th {
+      font-weight: 600;
+      background-color: #3B4252;
+    }
+    
+    .markdown-content table tr {
+      background-color: #2E3440;
+    }
+    
+    .markdown-content table tr:nth-child(2n) {
+      background-color: #333b4d;
+    }
+    
+    .markdown-content img {
+      max-width: 100%;
+      height: auto;
+      border-radius: 4px;
+    }
+  </style>
+  <!-- Marked.js for Markdown parsing -->
+  <script src="./lib/marked.min.js"></script>
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <div id="bar"><pear-ctrl></pear-ctrl></div>
+  
+  <!-- Join Session UI -->
+  <div id="join-section">
+    <label for="topic-key">Join a friend's chat:</label>
+    <input type="text" id="topic-key" placeholder="Enter topic key..." />
+    <button id="join-button">Join Chat</button>
+  </div>
+  
+  <!-- Chat container with active users and messages -->
+  <div id="chat-container">
+    <div id="active-users">
+      <!-- Active users will be added here dynamically -->
+      <div class="user-chip" style="background-color: #4A6BBF;">You</div>
+    </div>
+    <div id="chat-messages">
+      <!-- Chat messages will be added here dynamically -->
+    </div>
+  </div>
+  
+  <form>
+    <textarea name="prompt"></textarea>
+    <div style="float:right">
+      <input name="model" value="deepseek-r1:1.5b">
+      <input type="submit" value="Seek">
+    </div>
+  </form>
+</body>
+</html> 

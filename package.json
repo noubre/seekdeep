@@ -1,0 +1,34 @@
+{
+  "name": "seekdeep",
+  "main": "index.html",
+  "pear": {
+    "name": "seekdeep",
+    "type": "desktop",
+    "links": [
+      "http://localhost:11434"
+    ],
+    "gui": {
+      "backgroundColor": "#1F2430",
+      "height": "540",
+      "width": "720"
+    }
+  },
+  "type": "module",
+  "license": "Apache-2.0",
+  "scripts": {
+    "dev": "pear run -d",
+    "test": "brittle test/*.test.js"
+  },
+  "dependencies": {
+    "b4a": "^1.6.4",
+    "holesail-client": "^1.1.7",
+    "holesail-server": "^1.4.4",
+    "hypercore": "^10.0.0",
+    "hypercore-crypto": "^3.3.3",
+    "hyperswarm": "^4.0.0"
+  },
+  "devDependencies": {
+    "brittle": "^3.0.0",
+    "pear-interface": "^1.0.0"
+  }
+}
