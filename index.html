@@ -78,6 +78,52 @@
       border-left: 3px solid #81A1C1;
     }
     
+    /* Conversation thread styles */
+    .conversation-thread {
+      display: flex;
+      flex-direction: column;
+      margin-bottom: 24px;
+      position: relative;
+    }
+    
+    /* Connector line between question and answer */
+    .conversation-thread::before {
+      content: '';
+      position: absolute;
+      left: 20px;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background-color: rgba(255, 255, 255, 0.1);
+      z-index: 0;
+    }
+    
+    /* User's own thread doesn't need the line on the left */
+    .conversation-thread.own-thread::before {
+      left: auto;
+      right: 20px;
+    }
+    
+    /* Thread attribution label */
+    .thread-attribution {
+      font-size: 0.75em;
+      color: #a0a8bd;
+      margin: 5px 0;
+      padding: 2px 5px;
+      border-radius: 4px;
+      background-color: rgba(0, 0, 0, 0.2);
+      align-self: flex-start;
+      display: flex;
+      align-items: center;
+    }
+    
+    .thread-attribution .user-indicator {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-right: 5px;
+    }
+    
     .message-thinking {
       background-color: #2E3746;
       font-style: italic;
@@ -97,10 +143,40 @@
     .peer-color-4 { background-color: #BF616A; border-left: 3px solid #EBCB8B; }
     .peer-color-5 { background-color: #A3BE8C; border-left: 3px solid #5E81AC; }
     
+    /* Response attribution indicator */
+    .response-to {
+      font-size: 0.7em;
+      color: #a0a8bd;
+      background-color: rgba(0, 0, 0, 0.2);
+      padding: 2px 6px;
+      border-radius: 10px;
+      margin-left: 8px;
+      white-space: nowrap;
+      display: inline-flex;
+      align-items: center;
+    }
+    
+    .response-to .color-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      margin-right: 4px;
+      display: inline-block;
+    }
+    
     .message-header {
       font-weight: bold;
       margin-bottom: 5px;
       font-size: 0.9em;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    
+    .message-header .timestamp {
+      font-size: 0.7em;
+      font-weight: normal;
+      color: rgba(255, 255, 255, 0.6);
     }
     
     .thinking-section {
@@ -138,6 +214,16 @@
       border-radius: 12px;
       font-size: 0.8em;
       color: white;
+      display: flex;
+      align-items: center;
+    }
+    
+    .user-chip .status-indicator {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      margin-right: 5px;
+      background-color: #A3BE8C;
     }
     
     textarea {
@@ -328,7 +414,10 @@
   <div id="chat-container">
     <div id="active-users">
       <!-- Active users will be added here dynamically -->
-      <div class="user-chip" style="background-color: #4A6BBF;">You</div>
+      <div class="user-chip">
+        <span class="status-indicator"></span>
+        You
+      </div>
     </div>
     <div id="chat-messages">
       <!-- Chat messages will be added here dynamically -->
