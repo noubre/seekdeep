@@ -442,10 +442,6 @@ When deploying this application in production environments, consider:
 - **Bare Compatibility**: If you encounter errors about missing Node.js native modules, ensure you're using only Bare-compatible APIs
 - **Markdown Rendering Issues**: Check that the text contains valid Markdown syntax
 
-## License
-
-Apache-2.0
-
 ---
 
 Note: This is a proof-of-concept application. In a production environment, you would want to add proper error handling, security measures, and more robust P2P connection management.
