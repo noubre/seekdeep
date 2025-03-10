@@ -12,6 +12,7 @@ A P2P-enabled desktop application that interfaces with a local LLM (Ollama) usin
 - **Collaborative and private chat modes** for flexible peer interactions
 - Display of "thinking" content from LLMs that expose it
 - Built with Pear Runtime for cross-platform desktop support
+- Keyboard shortcuts for improved productivity (Ctrl/Cmd + Enter to submit)
 
 ## Prerequisites
 
@@ -27,7 +28,7 @@ Before running SeekDeep, make sure you have:
 
 1. Clone this repository:
    ```bash
-   git clone https://your-repo-url/seekdeep.git
+   git clone https://github.com/holepunchto/seekdeep.git
    cd seekdeep
    ```
 
@@ -75,6 +76,11 @@ SeekDeep offers two collaboration modes when interacting with peers:
 - **Private Mode**: Users only see their own conversations with the AI. Good for individual exploration without distracting others.
 
 You can switch between modes using the dropdown in the UI. As a host, when you change modes, all connected peers will be updated automatically.
+
+### Keyboard Shortcuts
+
+- **Ctrl/Cmd + Enter**: Submit the current prompt
+- **Enter**: New line in prompt (for multi-line prompts)
 
 ## Application Architecture
 
