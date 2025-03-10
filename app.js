@@ -494,11 +494,15 @@ function createMessageElement(message) {
       messageEl.className += ' message-current-peer';
       
       if (message.fromPeer) {
-        // This is a message from a peer
+        // This is a message from a peer or host
         messageEl.className = messageEl.className.replace('message-current-peer', 'message-peer');
         
-        // Add the peer's color class if available
-        if (message.peerId && activePeers.has(message.peerId)) {
+        // If it's from the host, add a special class
+        if (message.fromHost) {
+          messageEl.className += ' message-host';
+        }
+        // Otherwise, add the peer's color class if available
+        else if (message.peerId && activePeers.has(message.peerId)) {
           const peerInfo = activePeers.get(message.peerId);
           messageEl.className += ` ${peerInfo.colorClass}`;
         }
@@ -507,7 +511,9 @@ function createMessageElement(message) {
         const header = document.createElement('div');
         header.className = 'message-header';
         
-        if (message.peerId && activePeers.has(message.peerId)) {
+        if (message.fromHost) {
+          header.textContent = 'Host';
+        } else if (message.peerId && activePeers.has(message.peerId)) {
           header.textContent = activePeers.get(message.peerId).displayName;
         } else {
           header.textContent = message.fromPeer;
@@ -578,7 +584,38 @@ function addToChatHistory(message) {
   }
   
   chatHistory.push(message);
+  
+  // Broadcast the message to peers if we're the host and in collaborative mode
+  // Only broadcast user and assistant messages (not system or thinking messages)
+  if (isSessionHost && isCollaborativeMode && conns.length > 0 && 
+      (message.type === 'user' || message.type === 'assistant')) {
+    broadcastMessageToPeers(message);
+  }
+  
   updateChatDisplay();
+}
+
+// Broadcast a message to all connected peers
+function broadcastMessageToPeers(message) {
+  // Skip if we're not connected to any peers
+  if (conns.length === 0) return;
+  
+  console.log('Broadcasting message to peers:', message.type);
+  
+  // Create a copy of the message to send to peers
+  const messageToSend = {
+    ...message,
+    // Add fromHost flag to identify this as a host's message
+    fromHost: true
+  };
+  
+  // Send the message to all connected peers
+  for (const conn of conns) {
+    conn.write(JSON.stringify({
+      type: 'host_message',
+      message: messageToSend
+    }));
+  }
 }
 
 // Update the chat display from the history
@@ -740,33 +777,49 @@ function setupPeerMessageHandler(conn, peerId) {
         if (!message.requestId || message.requestId === activeRequestId) {
           let responseContent = '';
           if (message.isJson) {
-            // Parse the JSON response if it's from Ollama
-            responseContent = parseOllamaResponse(message.data);
-          } else {
-            responseContent = message.data;
-          }
-          
-          if (responseContent.trim()) {
-            // Add to existing assistant message or create new one
-            const lastMessage = chatHistory[chatHistory.length - 1];
-            if (lastMessage && lastMessage.type === 'assistant' && !message.isComplete) {
-              // Update existing message instead of creating a new one
-              lastMessage.content += responseContent;
-              updateChatDisplay();
-            } else {
-              addToChatHistory({
-                type: 'assistant',
-                content: responseContent
-              });
+            try {
+              responseContent = JSON.parse(message.content);
+            } catch (e) {
+              console.warn('Could not parse JSON response', e);
+              responseContent = message.content;
             }
+          } else {
+            responseContent = message.content;
           }
           
-          // If this is the last message, clear the active request ID
-          if (message.isComplete) {
-            activeRequestId = null;
+          const lastMessage = chatHistory[chatHistory.length - 1];
+          // If the last message is a thinking message, replace it
+          if (lastMessage && lastMessage.type === 'thinking') {
+            chatHistory.pop();
           }
-        } else {
-          console.log("Ignoring response from different request:", message.requestId);
+          
+          addToChatHistory({
+            type: 'assistant',
+            content: responseContent,
+            isComplete: message.isComplete || false
+          });
+        }
+        break;
+        
+      case 'host_message':
+        // Handle messages from the host (both user queries and AI responses)
+        if (isCollaborativeMode) {
+          console.log('Received host message:', message.message.type);
+          
+          // If the message is from the host, add it to our chat history
+          // Mark it as coming from the host
+          if (message.message.type === 'user') {
+            addToChatHistory({
+              ...message.message,
+              fromHost: true,
+              fromPeer: 'Host' // Show as coming from the host
+            });
+          } else if (message.message.type === 'assistant') {
+            addToChatHistory({
+              ...message.message,
+              fromHost: true
+            });
+          }
         }
         break;
         
