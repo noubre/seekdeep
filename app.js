@@ -579,10 +579,24 @@ function updateChatDisplay() {
 }
 
 // Add a function to broadcast messages to all peers
-function broadcastToPeers(message) {
-  if (isCollaborativeMode && conns.length > 0) {
-    for (const conn of conns) {
-      conn.write(JSON.stringify(message));
+function broadcastToPeers(message, targetPeerId = null) {
+  if (conns.length > 0) {
+    // In collaborative mode, send to all peers
+    // In private mode, only send to the specific peer if targetPeerId is provided
+    if (isCollaborativeMode) {
+      // Broadcast to all connected peers
+      for (const conn of conns) {
+        conn.write(JSON.stringify(message));
+      }
+    } else if (targetPeerId) {
+      // In private mode, only send to the specified peer
+      for (const conn of conns) {
+        const peerId = b4a.toString(conn.remotePublicKey, 'hex');
+        if (peerId === targetPeerId) {
+          conn.write(JSON.stringify(message));
+          break;
+        }
+      }
     }
   }
 }
@@ -600,7 +614,16 @@ async function ask(model, prompt) {
       content: prompt
     });
     
+    // Check if we need to send the query to a specific peer (when joining)
+    let targetPeerId = null;
+    if (!isSessionHost && !isCollaborativeMode && conns.length > 0) {
+      // In private mode, when we're a joiner, we need to track which peer we're sending to
+      const conn = conns[0]; // Typically this would be the host
+      targetPeerId = b4a.toString(conn.remotePublicKey, 'hex');
+    }
+    
     // In collaborative mode, broadcast the user's query to all peers
+    // In private mode, the host won't broadcast
     if (isSessionHost && isCollaborativeMode) {
       broadcastToPeers({
         type: 'peer_message',
@@ -754,7 +777,8 @@ async function ask(model, prompt) {
         type: 'query',
         requestId,
         model,
-        prompt
+        prompt,
+        fromPeerId: b4a.toString(publicKey, 'hex') // Add our own ID so the host knows who to respond to
       }));
       
       // Response will be handled by the connection's data event handler
@@ -902,8 +926,8 @@ function setupPeerMessageHandler(conn, peerId) {
         
       case 'peer_message':
         // Handle messages from peers (queries and responses)
-        // Only process peer messages if we're in collaborative mode
         if (isCollaborativeMode) {
+          // In collaborative mode, show all peer messages
           switch (message.messageType) {
             case 'user':
               // Add the peer's query to chat history
@@ -942,6 +966,7 @@ function setupPeerMessageHandler(conn, peerId) {
               break;
           }
         }
+        // In private mode, we don't process or display peer messages from other peers
         break;
         
       default:
@@ -953,6 +978,9 @@ function setupPeerMessageHandler(conn, peerId) {
 // Handle a query from a peer
 async function handlePeerQuery(conn, message) {
   try {
+    // Get the peer ID from the connection or the message
+    const peerId = message.fromPeerId || b4a.toString(conn.remotePublicKey, 'hex');
+    
     // In collaborative mode, show the thinking message and the query to the host
     // In private mode, only process the query but don't show it in the host's chat
     if (isCollaborativeMode) {
@@ -971,15 +999,37 @@ async function handlePeerQuery(conn, message) {
     // Add metadata to the response to indicate whether it should be shown only to the peer
     const isPrivate = !isCollaborativeMode;
     
-    // Send the complete response in a single message
-    conn.write(JSON.stringify({
-      type: 'response',
-      requestId: message.requestId,
-      data: parsedResult,
-      isComplete: true,
-      isJson: false,
-      isPrivate: isPrivate
-    }));
+    // In private mode, ensure the response goes only to the peer who sent the query
+    if (isPrivate) {
+      // Find the connection for this specific peer
+      for (const peerConn of conns) {
+        const connPeerId = b4a.toString(peerConn.remotePublicKey, 'hex');
+        if (connPeerId === peerId) {
+          // Send the response directly to the requesting peer
+          peerConn.write(JSON.stringify({
+            type: 'response',
+            requestId: message.requestId,
+            data: parsedResult,
+            isComplete: true,
+            isJson: false,
+            isPrivate: true,
+            fromPeerId: peerId
+          }));
+          break;
+        }
+      }
+    } else {
+      // In collaborative mode, we can just respond through the same connection
+      conn.write(JSON.stringify({
+        type: 'response',
+        requestId: message.requestId,
+        data: parsedResult,
+        isComplete: true,
+        isJson: false,
+        isPrivate: false,
+        fromPeerId: peerId
+      }));
+    }
     
     // Only add the response to our chat history if we're in collaborative mode
     if (isCollaborativeMode) {
@@ -995,7 +1045,8 @@ async function handlePeerQuery(conn, message) {
       requestId: message.requestId,
       error: error.message,
       isComplete: true,
-      isPrivate: !isCollaborativeMode
+      isPrivate: !isCollaborativeMode,
+      fromPeerId: message.fromPeerId || b4a.toString(conn.remotePublicKey, 'hex')
     }));
     
     // Only add the error message to our chat history if we're in collaborative mode
