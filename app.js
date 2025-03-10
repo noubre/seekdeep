@@ -745,22 +745,46 @@ async function handlePeerQuery(conn, message) {
     // Add metadata to the response to indicate whether it should be shown only to the peer
     const isPrivate = !isCollaborativeMode;
     
-    // Send back the response in chunks to simulate streaming
-    const chunkSize = 100;
-    for (let i = 0; i < parsedResult.length; i += chunkSize) {
-      const chunk = parsedResult.slice(i, i + chunkSize);
+    // Send back the response in word-aware chunks
+    const words = parsedResult.split(/(\s+)/);
+    let currentChunk = '';
+    const maxChunkSize = 1000; // Increased chunk size to reduce number of messages
+    
+    for (let i = 0; i < words.length; i++) {
+      const word = words[i];
       
+      // If adding this word would exceed the chunk size, send the current chunk
+      if (currentChunk.length + word.length > maxChunkSize && currentChunk.length > 0) {
+        conn.write(JSON.stringify({
+          type: 'response',
+          requestId: message.requestId,
+          data: currentChunk,
+          isComplete: false,
+          isJson: false,
+          isPrivate: isPrivate
+        }));
+        
+        // Small delay to avoid overwhelming the connection
+        await new Promise(resolve => setTimeout(resolve, 50));
+        
+        // Start a new chunk with the current word
+        currentChunk = word;
+      } else {
+        // Add the word to the current chunk
+        currentChunk += word;
+      }
+    }
+    
+    // Send any remaining content
+    if (currentChunk.length > 0) {
       conn.write(JSON.stringify({
         type: 'response',
         requestId: message.requestId,
-        data: chunk,
-        isComplete: i + chunkSize >= parsedResult.length,
+        data: currentChunk,
+        isComplete: true,
         isJson: false,
         isPrivate: isPrivate
       }));
-      
-      // Small delay to avoid overwhelming the connection
-      await new Promise(resolve => setTimeout(resolve, 50));
     }
     
     // Only add the response to our chat history if we're in collaborative mode
