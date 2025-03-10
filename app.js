@@ -778,7 +778,7 @@ async function ask(model, prompt) {
         requestId,
         model,
         prompt,
-        fromPeerId: b4a.toString(publicKey, 'hex') // Add our own ID so the host knows who to respond to
+        fromPeerId: b4a.toString(swarm.keyPair.publicKey, 'hex') // Add our own ID so the host knows who to respond to
       }));
       
       // Response will be handled by the connection's data event handler
