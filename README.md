@@ -80,7 +80,9 @@ You can switch between modes using the dropdown in the UI. As a host, when you c
 ### Keyboard Shortcuts
 
 - **Ctrl/Cmd + Enter**: Submit the current prompt
-- **Enter**: New line in prompt (for multi-line prompts)
+- **Enter**: Submit the current prompt (unless Shift is held)
+- **Shift + Enter**: New line in prompt (for multi-line prompts)
+- **Enter** (in topic key field): Join an existing chat without clicking the Join button
 
 ## Application Architecture
 

@@ -269,6 +269,9 @@ function initializeNewChat() {
   // Set as session host
   isSessionHost = true;
   
+  // Enable the chat mode select dropdown (only host can change mode)
+  chatModeSelect.disabled = false;
+  
   // Get the current mode from the UI
   isCollaborativeMode = chatModeSelect.value === 'collaborative';
   
@@ -309,6 +312,9 @@ function joinExistingChat(topicKeyHex) {
     
     // Set as joiner (not host)
     isSessionHost = false;
+    
+    // Disable the chat mode select dropdown (only host can change mode)
+    chatModeSelect.disabled = true;
     
     // As a joiner, we'll get the mode from the host later
     // but we'll start with our preferred mode from the UI
@@ -369,6 +375,10 @@ function leaveExistingChat() {
   
   // Clear peer handlers
   peerHandlers.clear();
+  
+  // When leaving a chat, we're not in any session, so enable the dropdown
+  // It will be properly set again when joining or creating a new session
+  chatModeSelect.disabled = false;
 }
 
 // Initialize a new chat session by default
@@ -678,7 +688,7 @@ async function ask(model, prompt) {
               assistantMessage.content += json.response;
               completeResponse += json.response;
               
-              // In collaborative mode, broadcast the response chunk to all peers
+              // Only in collaborative mode, broadcast the response chunk to all peers
               if (isCollaborativeMode) {
                 broadcastToPeers({
                   type: 'peer_message',
@@ -700,7 +710,7 @@ async function ask(model, prompt) {
                 activeRequestId = null;
               }
               
-              // In collaborative mode, send completion message to peers
+              // Only in collaborative mode, send completion message to peers
               if (isCollaborativeMode) {
                 broadcastToPeers({
                   type: 'peer_message',
@@ -817,6 +827,8 @@ function setupPeerMessageHandler(conn, peerId) {
           isCollaborativeMode = message.isCollaborativeMode;
           // Update the UI to reflect the host's setting
           chatModeSelect.value = isCollaborativeMode ? 'collaborative' : 'private';
+          // Ensure the dropdown remains disabled for peers
+          chatModeSelect.disabled = true;
           
           addToChatHistory({
             type: 'system',
@@ -851,7 +863,10 @@ function setupPeerMessageHandler(conn, peerId) {
             responseContent = message.data;
           }
           
-          if (responseContent.trim()) {
+          // In private mode (message.isPrivate === true), the response should only be shown 
+          // if it's for the current user's active request.
+          // In collaborative mode (message.isPrivate === false), show all responses.
+          if (responseContent.trim() && (isCollaborativeMode || message.requestId === activeRequestId)) {
             // Add to existing assistant message or create new one
             const lastMessage = chatHistory[chatHistory.length - 1];
             if (lastMessage && lastMessage.type === 'assistant' && !message.isComplete) {
@@ -887,6 +902,7 @@ function setupPeerMessageHandler(conn, peerId) {
         
       case 'peer_message':
         // Handle messages from peers (queries and responses)
+        // Only process peer messages if we're in collaborative mode
         if (isCollaborativeMode) {
           switch (message.messageType) {
             case 'user':
@@ -978,7 +994,8 @@ async function handlePeerQuery(conn, message) {
       type: 'response',
       requestId: message.requestId,
       error: error.message,
-      isComplete: true
+      isComplete: true,
+      isPrivate: !isCollaborativeMode
     }));
     
     // Only add the error message to our chat history if we're in collaborative mode
