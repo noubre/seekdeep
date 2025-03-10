@@ -60,8 +60,6 @@ function parseOllamaResponse(text) {
     const lines = text.split('\n').filter(line => line.trim());
     
     let responseText = '';
-    let inThinkMode = false;
-    let thinkContent = '';
     
     for (const line of lines) {
       try {
@@ -69,57 +67,18 @@ function parseOllamaResponse(text) {
         console.log("Parsed JSON line:", json);
         
         if (json.response) {
-          // Handle think tags
-          if (json.response.includes('<think>')) {
-            inThinkMode = true;
-            // Add the start tag for think content
-            responseText += '\n[THINKING]\n';
-            
-            // Extract text after the think tag if any
-            const afterTag = json.response.split('<think>')[1];
-            if (afterTag && afterTag.trim()) {
-              thinkContent += afterTag;
-            }
-          } 
-          else if (json.response.includes('</think>')) {
-            inThinkMode = false;
-            
-            // Extract text before the end tag if any
-            const beforeTag = json.response.split('</think>')[0];
-            if (beforeTag && beforeTag.trim()) {
-              thinkContent += beforeTag;
-            }
-            
-            // Add the think content
-            responseText += thinkContent;
-            // Add the end tag for think content
-            responseText += '\n[/THINKING]\n\n';
-            thinkContent = '';
+          // Skip empty responses
+          if (json.response.trim() === '') {
+            continue;
           }
-          else if (inThinkMode) {
-            // Inside think tags, accumulate the content
-            thinkContent += json.response;
-          }
-          else {
-            // Skip empty responses
-            if (json.response.trim() === '') {
-              continue;
-            }
-            
-            // Normal response text
-            responseText += json.response;
-          }
+          
+          // Add the response text as is, preserving think tags
+          responseText += json.response;
         }
         
         // Handle completion
         if (json.done) {
           console.log('LLM response complete:', json.done_reason || 'unknown reason');
-          
-          // If we're still in think mode when done, close it
-          if (inThinkMode && thinkContent) {
-            responseText += thinkContent;
-            responseText += '\n[/THINKING]\n\n';
-          }
         }
       } catch (parseErr) {
         console.warn('Failed to parse JSON line:', line, parseErr);
@@ -539,8 +498,8 @@ function createMessageElement(message) {
       // Extract thinking sections
       let formattedContent = message.content;
       
-      // Replace thinking tags with formatted HTML
-      formattedContent = formattedContent.replace(/\[THINKING\]\n([\s\S]*?)\n\[\/THINKING\]\n\n/g, function(match, thinkContent) {
+      // Replace think tags with formatted HTML
+      formattedContent = formattedContent.replace(/<think>([\s\S]*?)<\/think>/g, function(match, thinkContent) {
         return `<div class="thinking-section"><div class="thinking-header">Thinking</div>${thinkContent}</div>`;
       });
       
@@ -609,7 +568,205 @@ function updateChatDisplay() {
   chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
 }
 
-// Setup message handler for a peer connection
+// Add a function to broadcast messages to all peers
+function broadcastToPeers(message) {
+  if (isCollaborativeMode && conns.length > 0) {
+    for (const conn of conns) {
+      conn.write(JSON.stringify(message));
+    }
+  }
+}
+
+// Update the ask function to broadcast host's queries and responses
+async function ask(model, prompt) {
+  try {
+    // Generate a unique request ID
+    const requestId = Date.now().toString();
+    activeRequestId = requestId;
+    
+    // Add user message to history
+    addToChatHistory({
+      type: 'user',
+      content: prompt
+    });
+    
+    // In collaborative mode, broadcast the user's query to all peers
+    if (isSessionHost && isCollaborativeMode) {
+      broadcastToPeers({
+        type: 'peer_message',
+        messageType: 'user',
+        content: prompt,
+        fromPeer: 'Host',
+        requestId
+      });
+    }
+    
+    // Add thinking message
+    const thinkingIndex = chatHistory.length;
+    addToChatHistory({
+      type: 'thinking',
+      content: 'Thinking...'
+    });
+    
+    // If we're the host, use our local AI. If we're a joiner, send through P2P.
+    if (isSessionHost) {
+      // Host uses their own local AI
+      chatHistory[thinkingIndex].content = 'Using local Ollama for LLM query...';
+      updateChatDisplay();
+      
+      // Get the base URL for Ollama
+      const baseUrl = getOllamaBaseUrl();
+      const url = new URL('/api/generate', baseUrl);
+      
+      console.log('Querying local LLM at URL:', url.toString());
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          prompt,
+          stream: true
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error: ${response.status}`);
+      }
+      
+      // Remove the thinking message
+      chatHistory.pop();
+      
+      // Create a new assistant message that we'll update
+      let assistantMessage = {
+        type: 'assistant',
+        content: '',
+        requestId // Add the request ID to the message for tracking
+      };
+      chatHistory.push(assistantMessage);
+      
+      // Handle streaming response
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let completeResponse = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        const chunk = decoder.decode(value, { stream: true });
+        console.log("Raw chunk:", chunk);
+        buffer += chunk;
+        
+        // Process buffer to extract complete JSON objects
+        let lines = buffer.split('\n');
+        buffer = lines.pop() || ''; // Keep the last potentially incomplete line in the buffer
+        
+        for (const line of lines) {
+          if (line.trim() === '') continue;
+          
+          try {
+            const json = JSON.parse(line);
+            if (json.response) {
+              // Skip newlines at the beginning if the content is empty
+              if (assistantMessage.content === '' && json.response.trim() === '') {
+                continue;
+              }
+              
+              // Add the response text as is, preserving think tags
+              assistantMessage.content += json.response;
+              completeResponse += json.response;
+              
+              // In collaborative mode, broadcast the response chunk to all peers
+              if (isCollaborativeMode) {
+                broadcastToPeers({
+                  type: 'peer_message',
+                  messageType: 'assistant',
+                  content: json.response,
+                  fromPeer: 'Host',
+                  requestId,
+                  isComplete: false
+                });
+              }
+              
+              updateChatDisplay();
+            }
+            
+            if (json.done) {
+              console.log("Response complete:", json.done_reason);
+              // Reset active request ID when done
+              if (activeRequestId === requestId) {
+                activeRequestId = null;
+              }
+              
+              // In collaborative mode, send completion message to peers
+              if (isCollaborativeMode) {
+                broadcastToPeers({
+                  type: 'peer_message',
+                  messageType: 'assistant',
+                  content: '',
+                  fromPeer: 'Host',
+                  requestId,
+                  isComplete: true
+                });
+              }
+            }
+          } catch (err) {
+            console.warn("Error parsing JSON line:", line, err);
+          }
+        }
+      }
+      
+      console.log("Complete response:", completeResponse);
+      return completeResponse;
+    } else {
+      // We're a joiner - send the query through a peer
+      // Check if we have connected peers
+      if (conns.length === 0) {
+        throw new Error("No peers connected. Cannot send query.");
+      }
+      
+      // Choose a peer to send the query to (ideally the host)
+      // For simplicity, we'll just use the first connected peer
+      const peer = conns[0];
+      const peerId = b4a.toString(peer.remotePublicKey, 'hex');
+      const peerName = activePeers.has(peerId) ? 
+        activePeers.get(peerId).displayName : 
+        `Peer${peerId.slice(0, 6)}`;
+      
+      // Update the thinking message
+      chatHistory[thinkingIndex].content = `Sending query to ${peerName}...`;
+      updateChatDisplay();
+      
+      // Send the query to the peer
+      peer.write(JSON.stringify({
+        type: 'query',
+        requestId,
+        model,
+        prompt
+      }));
+      
+      // Response will be handled by the connection's data event handler
+      return;
+    }
+  } catch (error) {
+    console.error('Error asking LLM:', error);
+    
+    // Reset active request ID on error
+    activeRequestId = null;
+    
+    // Add error message to chat
+    addToChatHistory({
+      type: 'system',
+      content: `Error: ${error.message}`
+    });
+    
+    return null;
+  }
+}
+
+// Update the message handler to handle peer messages
 function setupPeerMessageHandler(conn, peerId) {
   return function handleMessage(data) {
     const message = JSON.parse(data.toString());
@@ -728,6 +885,49 @@ function setupPeerMessageHandler(conn, peerId) {
         }
         break;
         
+      case 'peer_message':
+        // Handle messages from peers (queries and responses)
+        if (isCollaborativeMode) {
+          switch (message.messageType) {
+            case 'user':
+              // Add the peer's query to chat history
+              addToChatHistory({
+                type: 'user',
+                content: message.content,
+                fromPeer: message.fromPeer,
+                peerId: peerId,
+                requestId: message.requestId
+              });
+              break;
+              
+            case 'assistant':
+              // Handle assistant response from peer
+              const lastMessage = chatHistory[chatHistory.length - 1];
+              if (lastMessage && lastMessage.type === 'assistant' && !message.isComplete) {
+                // Update existing message
+                lastMessage.content += message.content;
+              } else if (lastMessage && lastMessage.type === 'thinking') {
+                // Replace thinking message with assistant message
+                chatHistory.pop();
+                addToChatHistory({
+                  type: 'assistant',
+                  content: message.content,
+                  requestId: message.requestId
+                });
+              } else if (!lastMessage || lastMessage.type !== 'assistant') {
+                // Create new assistant message
+                addToChatHistory({
+                  type: 'assistant',
+                  content: message.content,
+                  requestId: message.requestId
+                });
+              }
+              updateChatDisplay();
+              break;
+          }
+        }
+        break;
+        
       default:
         console.warn('Unknown message type:', message.type);
     }
@@ -755,47 +955,15 @@ async function handlePeerQuery(conn, message) {
     // Add metadata to the response to indicate whether it should be shown only to the peer
     const isPrivate = !isCollaborativeMode;
     
-    // Send back the response in word-aware chunks
-    const words = parsedResult.split(/(\s+)/);
-    let currentChunk = '';
-    const maxChunkSize = 1000; // Increased chunk size to reduce number of messages
-    
-    for (let i = 0; i < words.length; i++) {
-      const word = words[i];
-      
-      // If adding this word would exceed the chunk size, send the current chunk
-      if (currentChunk.length + word.length > maxChunkSize && currentChunk.length > 0) {
-        conn.write(JSON.stringify({
-          type: 'response',
-          requestId: message.requestId,
-          data: currentChunk,
-          isComplete: false,
-          isJson: false,
-          isPrivate: isPrivate
-        }));
-        
-        // Small delay to avoid overwhelming the connection
-        await new Promise(resolve => setTimeout(resolve, 50));
-        
-        // Start a new chunk with the current word
-        currentChunk = word;
-      } else {
-        // Add the word to the current chunk
-        currentChunk += word;
-      }
-    }
-    
-    // Send any remaining content
-    if (currentChunk.length > 0) {
-      conn.write(JSON.stringify({
-        type: 'response',
-        requestId: message.requestId,
-        data: currentChunk,
-        isComplete: true,
-        isJson: false,
-        isPrivate: isPrivate
-      }));
-    }
+    // Send the complete response in a single message
+    conn.write(JSON.stringify({
+      type: 'response',
+      requestId: message.requestId,
+      data: parsedResult,
+      isComplete: true,
+      isJson: false,
+      isPrivate: isPrivate
+    }));
     
     // Only add the response to our chat history if we're in collaborative mode
     if (isCollaborativeMode) {
@@ -853,209 +1021,6 @@ async function queryLocalLLM(model, prompt) {
   }
 }
 
-// Ask the LLM for a response (directly or via peers)
-async function ask(model, prompt) {
-  try {
-    // Generate a unique request ID
-    const requestId = Date.now().toString();
-    activeRequestId = requestId;
-    
-    // Add user message to history
-    addToChatHistory({
-      type: 'user',
-      content: prompt
-    });
-    
-    // Add thinking message
-    const thinkingIndex = chatHistory.length;
-    addToChatHistory({
-      type: 'thinking',
-      content: 'Thinking...'
-    });
-    
-    // If we're the host, use our local AI. If we're a joiner, send through P2P.
-    if (isSessionHost) {
-      // Host uses their own local AI
-      chatHistory[thinkingIndex].content = 'Using local Ollama for LLM query...';
-      updateChatDisplay();
-      
-      // Get the base URL for Ollama
-      const baseUrl = getOllamaBaseUrl();
-      const url = new URL('/api/generate', baseUrl);
-      
-      console.log('Querying local LLM at URL:', url.toString());
-      
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model,
-          prompt,
-          stream: true
-        })
-      });
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error: ${response.status}`);
-      }
-      
-      // Remove the thinking message
-      chatHistory.pop();
-      
-      // Create a new assistant message that we'll update
-      let assistantMessage = {
-        type: 'assistant',
-        content: '',
-        requestId // Add the request ID to the message for tracking
-      };
-      chatHistory.push(assistantMessage);
-      
-      // Handle streaming response
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let completeResponse = '';
-      let inThinkMode = false;
-      let thinkContent = '';
-      
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        
-        const chunk = decoder.decode(value, { stream: true });
-        console.log("Raw chunk:", chunk);
-        buffer += chunk;
-        
-        // Process buffer to extract complete JSON objects
-        let lines = buffer.split('\n');
-        buffer = lines.pop() || ''; // Keep the last potentially incomplete line in the buffer
-        
-        for (const line of lines) {
-          if (line.trim() === '') continue;
-          
-          try {
-            const json = JSON.parse(line);
-            if (json.response) {
-              // Handle think tags
-              if (json.response.includes('<think>')) {
-                inThinkMode = true;
-                
-                // Add the start tag for think content
-                assistantMessage.content += '\n[THINKING]\n';
-                
-                // Extract text after the think tag if any
-                const afterTag = json.response.split('<think>')[1];
-                if (afterTag && afterTag.trim()) {
-                  assistantMessage.content += afterTag;
-                }
-              } 
-              else if (json.response.includes('</think>')) {
-                inThinkMode = false;
-                
-                // Extract text before the end tag if any
-                const beforeTag = json.response.split('</think>')[0];
-                if (beforeTag && beforeTag.trim()) {
-                  assistantMessage.content += beforeTag;
-                }
-                
-                // Add the end tag for think content
-                assistantMessage.content += '\n[/THINKING]\n\n';
-              }
-              else {
-                // Skip newlines at the beginning if we're not in think mode
-                if (!inThinkMode && assistantMessage.content === '' && json.response.trim() === '') {
-                  continue;
-                }
-                
-                // Add the response text
-                assistantMessage.content += json.response;
-                completeResponse += json.response;
-              }
-              
-              updateChatDisplay();
-            }
-            
-            if (json.done) {
-              console.log("Response complete:", json.done_reason);
-              // Reset active request ID when done
-              if (activeRequestId === requestId) {
-                activeRequestId = null;
-              }
-              
-              // If we're still in think mode when done, close it
-              if (inThinkMode) {
-                assistantMessage.content += '\n[/THINKING]\n\n';
-                updateChatDisplay();
-              }
-            }
-          } catch (err) {
-            console.warn("Error parsing JSON line:", line, err);
-          }
-        }
-      }
-      
-      // Process any remaining buffer
-      if (buffer.trim()) {
-        try {
-          const json = JSON.parse(buffer);
-          if (json.response) {
-            assistantMessage.content += json.response;
-            completeResponse += json.response;
-            updateChatDisplay();
-          }
-        } catch (err) {
-          console.warn("Error parsing final buffer:", buffer, err);
-        }
-      }
-      
-      console.log("Complete response:", completeResponse);
-      return completeResponse;
-    } else {
-      // We're a joiner - send the query through a peer
-      // Check if we have connected peers
-      if (conns.length === 0) {
-        throw new Error("No peers connected. Cannot send query.");
-      }
-      
-      // Choose a peer to send the query to (ideally the host)
-      // For simplicity, we'll just use the first connected peer
-      const peer = conns[0];
-      const peerId = b4a.toString(peer.remotePublicKey, 'hex');
-      const peerName = activePeers.has(peerId) ? 
-        activePeers.get(peerId).displayName : 
-        `Peer${peerId.slice(0, 6)}`;
-      
-      // Update the thinking message
-      chatHistory[thinkingIndex].content = `Sending query to ${peerName}...`;
-      updateChatDisplay();
-      
-      // Send the query to the peer
-      peer.write(JSON.stringify({
-        type: 'query',
-        requestId,
-        model,
-        prompt
-      }));
-      
-      // Response will be handled by the connection's data event handler
-      return;
-    }
-  } catch (error) {
-    console.error('Error asking LLM:', error);
-    
-    // Reset active request ID on error
-    activeRequestId = null;
-    
-    // Add error message to chat
-    addToChatHistory({
-      type: 'system',
-      content: `Error: ${error.message}`
-    });
-    
-    return null;
-  }
-}
-
 // Join button click event handler
 joinButton.addEventListener('click', () => {
   const topicKeyHex = topicKeyInput.value.trim();
@@ -1068,6 +1033,14 @@ joinButton.addEventListener('click', () => {
       type: 'system',
       content: 'Please enter a valid topic key to join a chat session.'
     });
+  }
+});
+
+// Add Enter key handler for topic key input
+topicKeyInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    joinButton.click();
   }
 });
 
@@ -1087,9 +1060,13 @@ form.addEventListener('submit', async (event) => {
   await ask(model, prompt);
 });
 
-// Enable CTRL+Enter to submit
+// Enable CTRL+Enter to submit and Enter to submit
 promptArea.addEventListener('keydown', (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+    form.dispatchEvent(new Event('submit'));
+  } else if (event.key === 'Enter' && !event.shiftKey) {
+    // Allow Shift+Enter for new lines
+    event.preventDefault();
     form.dispatchEvent(new Event('submit'));
   }
 });
