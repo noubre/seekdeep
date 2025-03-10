@@ -586,11 +586,63 @@ function updateChatDisplay() {
   // Clear current display
   chatMessagesEl.innerHTML = '';
   
+  // Add a mode indicator at the top of the chat
+  const modeIndicator = document.createElement('div');
+  modeIndicator.className = 'mode-indicator';
+  modeIndicator.textContent = isCollaborativeMode 
+    ? '👥 Collaborative Mode: Everyone sees all messages' 
+    : '🔒 Private Mode: You only see your own messages';
+  chatMessagesEl.appendChild(modeIndicator);
+  
   // Keep track of the last message type to avoid duplicates
   let lastMessageType = null;
   let lastMessageContent = null;
   
-  for (const message of chatHistory) {
+  // Filter messages based on chat mode
+  const messagesToDisplay = chatHistory.filter(message => {
+    // Always show system messages
+    if (message.type === 'system') {
+      return true;
+    }
+    
+    // In collaborative mode, show all messages
+    if (isCollaborativeMode) {
+      return true;
+    }
+    
+    // In private mode:
+    // 1. Show messages from the current user (no fromPeer property)
+    // 2. Show assistant responses to the current user's queries
+    // 3. Don't show messages from other peers or responses to their queries
+    
+    // Current user's messages
+    if (message.type === 'user' && !message.fromPeer) {
+      return true;
+    }
+    
+    // Assistant responses - show only if they are in response to current user's query
+    if (message.type === 'assistant') {
+      // Find the last user message before this assistant message
+      const index = chatHistory.indexOf(message);
+      for (let i = index - 1; i >= 0; i--) {
+        const prevMessage = chatHistory[i];
+        if (prevMessage.type === 'user') {
+          // If the previous user message has no fromPeer, it's from the current user
+          return !prevMessage.fromPeer;
+        }
+      }
+    }
+    
+    // Thinking messages - show if they're related to the current user's query
+    if (message.type === 'thinking') {
+      return true; // For simplicity, we'll show all thinking messages
+    }
+    
+    // By default, don't show other messages in private mode
+    return false;
+  });
+  
+  for (const message of messagesToDisplay) {
     // Skip duplicate consecutive assistant messages
     if (message.type === 'assistant' && lastMessageType === 'assistant' && message.content === lastMessageContent) {
       console.log("Skipping duplicate consecutive message in display");
