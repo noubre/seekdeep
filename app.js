@@ -700,13 +700,23 @@ function setupPeerMessageHandler(conn, peerId) {
             if (lastMessage && lastMessage.type === 'assistant' && !message.isComplete) {
               // Update existing message instead of creating a new one
               lastMessage.content += responseContent;
-              updateChatDisplay();
-            } else {
+            } else if (lastMessage && lastMessage.type === 'thinking') {
+              // Replace thinking message with assistant message
+              chatHistory.pop();
               addToChatHistory({
                 type: 'assistant',
-                content: responseContent
+                content: responseContent,
+                requestId: message.requestId
+              });
+            } else if (!lastMessage || lastMessage.type !== 'assistant') {
+              // Create new assistant message
+              addToChatHistory({
+                type: 'assistant',
+                content: responseContent,
+                requestId: message.requestId
               });
             }
+            updateChatDisplay();
           }
           
           // If this is the last message, clear the active request ID
