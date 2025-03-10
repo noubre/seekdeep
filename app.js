@@ -624,14 +624,23 @@ async function ask(model, prompt) {
     
     // In collaborative mode, broadcast the user's query to all peers
     // In private mode, the host won't broadcast
-    if (isSessionHost && isCollaborativeMode) {
+    if (isCollaborativeMode) {
+      // Get the sender name (Host or Peer name)
+      const sender = isSessionHost ? 'Host' : 
+        (activePeers.has(b4a.toString(swarm.keyPair.publicKey, 'hex')) ? 
+        activePeers.get(b4a.toString(swarm.keyPair.publicKey, 'hex')).displayName : 'You');
+      
+      // Broadcast to all peers
       broadcastToPeers({
         type: 'peer_message',
         messageType: 'user',
         content: prompt,
-        fromPeer: 'Host',
+        fromPeer: sender,
         requestId
       });
+    } else if (isSessionHost) {
+      // In private mode, host doesn't broadcast
+      // But we don't need to do anything special here
     }
     
     // Add thinking message
@@ -981,6 +990,11 @@ async function handlePeerQuery(conn, message) {
     // Get the peer ID from the connection or the message
     const peerId = message.fromPeerId || b4a.toString(conn.remotePublicKey, 'hex');
     
+    // Get peer display name
+    const peerName = activePeers.has(peerId) ? 
+      activePeers.get(peerId).displayName : 
+      `Peer${peerId.slice(0, 6)}`;
+    
     // In collaborative mode, show the thinking message and the query to the host
     // In private mode, only process the query but don't show it in the host's chat
     if (isCollaborativeMode) {
@@ -988,6 +1002,20 @@ async function handlePeerQuery(conn, message) {
         type: 'thinking',
         content: `Received query from peer: ${message.prompt}\nThinking...`
       });
+      
+      // Also broadcast this peer's query to all other peers
+      for (const peerConn of conns) {
+        // Skip the original sender
+        if (b4a.toString(peerConn.remotePublicKey, 'hex') === peerId) continue;
+        
+        peerConn.write(JSON.stringify({
+          type: 'peer_message',
+          messageType: 'user',
+          content: message.prompt,
+          fromPeer: peerName,
+          requestId: message.requestId
+        }));
+      }
     }
     
     // Query the local Ollama
@@ -1019,7 +1047,9 @@ async function handlePeerQuery(conn, message) {
         }
       }
     } else {
-      // In collaborative mode, we can just respond through the same connection
+      // In collaborative mode, we respond to the peer and also broadcast to all other peers
+      
+      // First, respond to the peer who sent the query
       conn.write(JSON.stringify({
         type: 'response',
         requestId: message.requestId,
@@ -1029,6 +1059,21 @@ async function handlePeerQuery(conn, message) {
         isPrivate: false,
         fromPeerId: peerId
       }));
+      
+      // Then, broadcast the response to all other peers
+      for (const peerConn of conns) {
+        // Skip the original sender
+        if (peerConn === conn) continue;
+        
+        peerConn.write(JSON.stringify({
+          type: 'peer_message',
+          messageType: 'assistant',
+          content: parsedResult,
+          fromPeer: peerName, 
+          requestId: message.requestId,
+          isComplete: true
+        }));
+      }
     }
     
     // Only add the response to our chat history if we're in collaborative mode
