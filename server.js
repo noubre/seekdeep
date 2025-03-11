@@ -3,41 +3,125 @@ import { spawn } from 'child_process';
 import Hyperswarm from 'hyperswarm';
 import crypto from 'hypercore-crypto';
 import b4a from 'b4a';
+import express from 'express';
 
 // Default Ollama API URL
 const OLLAMA_API_URL = 'http://localhost:11434';
 
+// Default models to suggest if model list can't be fetched
+const DEFAULT_MODELS = [
+  { id: 'deepseek-r1:1.5b', name: 'DeepSeek 1.5b' },
+  { id: 'llama2:7b', name: 'Llama 2 7B' },
+  { id: 'mistral:7b', name: 'Mistral 7B' },
+  { id: 'phi:2.7b', name: 'Phi-2 2.7B' },
+  { id: 'gemma:7b', name: 'Gemma 7B' }
+];
+
+// Store available models
+let availableModels = [];
+
+// Create an Express app
+const app = express();
+
 // Create a simple HTTP server
-const server = http.createServer((req, res) => {
-  if (req.url === '/') {
-    res.writeHead(200, { 'Content-Type': 'text/html' });
-    res.end(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>SeekDeep Local Server</title>
-        <style>
-          body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
-          pre { background: #f5f5f5; padding: 10px; border-radius: 5px; overflow: auto; }
-        </style>
-      </head>
-      <body>
-        <h1>SeekDeep Local Test Server</h1>
-        <p>This server is running and allows P2P access to Ollama API (port 11434).</p>
-        <p>Status: <strong>Running</strong></p>
-        <h2>Usage with curl:</h2>
-        <pre>curl -X POST http://localhost:5000/api/generate -H "Content-Type: application/json" -d '{"model": "deepseek-r1:1.5b", "prompt": "Hello, how are you?"}'</pre>
-      </body>
-      </html>
-    `);
-  } else if (req.url.startsWith('/api/')) {
-    // Proxy to Ollama
-    proxyToOllama(req, res);
-  } else {
-    res.writeHead(404);
-    res.end('Not found');
+const server = http.createServer(app);
+
+// CORS middleware for allowing cross-origin requests
+function setupCORS(req, res, next) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  
+  if (req.method === 'OPTIONS') {
+    return res.end();
+  }
+  
+  next();
+}
+
+// Proxy Ollama API requests 
+app.use('/api/tags', setupCORS, async (req, res) => {
+  try {
+    // Fetch available models from Ollama
+    const models = await getAvailableModels();
+    res.json({ models });
+  } catch (error) {
+    console.error('Error fetching Ollama models:', error);
+    res.status(500).json({ error: 'Failed to fetch models from Ollama' });
   }
 });
+
+app.get('/', (req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/html' });
+  res.end(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>SeekDeep Local Server</title>
+      <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        pre { background: #f5f5f5; padding: 10px; border-radius: 5px; overflow: auto; }
+        .model-list { margin-top: 20px; }
+        .model-item { margin-bottom: 10px; padding: 10px; background: #eef; border-radius: 5px; }
+      </style>
+    </head>
+    <body>
+      <h1>SeekDeep Local Test Server</h1>
+      <p>This server is running and allows P2P access to Ollama API (port 11434).</p>
+      <p>Status: <strong>Running</strong></p>
+      <h2>Usage with curl:</h2>
+      <pre>curl -X POST http://localhost:3000/api/generate -H "Content-Type: application/json" -d '{"model": "deepseek-r1:1.5b", "prompt": "Hello, how are you?"}'</pre>
+      
+      <div class="model-list">
+        <h2>Available Models</h2>
+        ${renderAvailableModels()}
+      </div>
+    </body>
+    </html>
+  `);
+});
+
+app.get('/api/models', async (req, res) => {
+  // Endpoint to get available models
+  getAvailableModels()
+    .then(models => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ models }));
+    })
+    .catch(err => {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    });
+});
+
+app.use('/api', (req, res) => {
+  // Proxy to Ollama
+  proxyToOllama(req, res);
+});
+
+app.use((req, res) => {
+  res.writeHead(404);
+  res.end('Not found');
+});
+
+// Render available models as HTML
+function renderAvailableModels() {
+  if (!availableModels.length) {
+    return '<p>Loading models information...</p>';
+  }
+  
+  return `
+    <div>
+      ${availableModels.map(model => `
+        <div class="model-item">
+          <h3>${model.name || model.id}</h3>
+          <p>ID: ${model.id}</p>
+          ${model.description ? `<p>${model.description}</p>` : ''}
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
 
 // Proxy a request to the Ollama API
 function proxyToOllama(req, res) {
@@ -68,6 +152,31 @@ function proxyToOllama(req, res) {
     console.error('Error proxying to Ollama:', err);
     res.writeHead(500);
     res.end('Internal server error: ' + err.message);
+  }
+}
+
+// Function to fetch available models from Ollama
+async function getAvailableModels() {
+  try {
+    console.log('Fetching available models from Ollama');
+    const response = await fetch('http://localhost:11434/api/tags');
+    
+    if (!response.ok) {
+      throw new Error(`Ollama API returned ${response.status}: ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    console.log('Ollama returned data:', data);
+    
+    if (data && data.models) {
+      return data.models;
+    } else {
+      console.warn('Ollama API returned unexpected format:', data);
+      return [];
+    }
+  } catch (error) {
+    console.error('Error fetching models from Ollama:', error);
+    return [];
   }
 }
 
@@ -108,10 +217,18 @@ function parseOllamaResponse(text) {
   }
 }
 
-// Start the server
+// Start the server, 5000 is usually already taken
 const PORT = 3000;
 server.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);
+  console.log(`Server public key: ${b4a.toString(keyPair.publicKey, 'hex')}`);
+  console.log('Sharing this public key will allow others to connect to this server via the P2P network');
+});
+
+// Log when server is closed
+server.on('close', () => {
+  console.log('Server closed');
+  swarm.destroy();
 });
 
 // Initialize Hyperswarm
@@ -200,24 +317,25 @@ async function handleClientQuery(conn, message) {
     const url = `${OLLAMA_API_URL}/api/generate`;
     
     console.log(`Sending request to Ollama API at: ${url}`);
+    console.log(`Using model: ${model}`);
     
-    // In Bare environments, use global fetch if available
-    const fetchFn = typeof fetch !== 'undefined' ? fetch : 
-                   (typeof global !== 'undefined' && global.fetch) ? global.fetch : 
-                   null;
-    
+    // Using native Node.js fetch API
+    const fetchFn = typeof fetch === 'function' ? fetch : null;
     if (!fetchFn) {
-      throw new Error('No fetch implementation available');
+      throw new Error('Fetch API not available');
     }
     
+    // Make the request to Ollama
     const response = await fetchFn(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json'
+      },
       body: JSON.stringify({ model, prompt, stream: true })
     });
     
     if (!response.ok) {
-      throw new Error(`HTTP error: ${response.status}`);
+      throw new Error(`Ollama API returned status ${response.status}`);
     }
     
     // Stream the response back to the client
@@ -361,5 +479,15 @@ function startOllama() {
 // Check if Ollama is running
 checkOllama();
 
-console.log('HTTP server is running on http://localhost:5000');
+// Fetch available models on startup
+getAvailableModels()
+  .then(models => {
+    console.log(`Found ${models.length} available models:`);
+    models.forEach(model => console.log(` - ${model.name} (${model.id})`));
+  })
+  .catch(error => {
+    console.error('Error getting available models:', error);
+  });
+
+console.log('HTTP server is running on http://localhost:3000');
 console.log('Press Ctrl+C to stop the server'); 

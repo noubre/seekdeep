@@ -74,6 +74,23 @@ The server component makes your local Ollama instance accessible over P2P:
 
 4. The app will automatically discover and connect to peers on the P2P network using Hyperswarm.
 
+### Model Selection
+
+SeekDeep now supports switching between different LLM models:
+
+1. A model selector dropdown is available in the chat interface.
+2. By default, SeekDeep will fetch the list of available models from your local Ollama installation.
+3. If you don't have specific models installed, you can install them with Ollama:
+   ```bash
+   # Install additional models
+   ollama pull llama2:7b
+   ollama pull mistral:7b
+   ollama pull phi:2.7b
+   ollama pull gemma:7b
+   ```
+4. The model selection is used for all subsequent queries until changed.
+5. The host's model selection determines which model processes queries for all connected peers.
+
 ### Collaboration Modes
 
 SeekDeep offers two collaboration modes when interacting with peers:

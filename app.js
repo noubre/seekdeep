@@ -12,6 +12,20 @@ const promptArea = document.querySelector('textarea[name="prompt"]');
 const topicKeyInput = document.getElementById('topic-key');
 const joinButton = document.getElementById('join-button');
 const chatModeSelect = document.getElementById('chat-mode');
+const modelSelect = document.getElementById('model-select');
+const refreshModelsButton = document.getElementById('refresh-models');
+
+// Default models list - these are common Ollama models
+const DEFAULT_MODELS = [
+  { id: 'deepseek-r1:1.5b', name: 'DeepSeek 1.5b' },
+  { id: 'llama2:7b', name: 'Llama 2 7B' },
+  { id: 'mistral:7b', name: 'Mistral 7B' },
+  { id: 'phi:2.7b', name: 'Phi-2 2.7B' },
+  { id: 'gemma:7b', name: 'Gemma 7B' }
+];
+
+// Default model to use
+let currentModel = 'deepseek-r1:1.5b';
 
 // Configure marked.js for secure Markdown rendering
 marked.setOptions({
@@ -384,6 +398,44 @@ function leaveExistingChat() {
 // Initialize a new chat session by default
 initializeNewChat();
 
+// Fetch available models from Ollama
+fetchAvailableModels();
+
+// Add event listener for the refresh models button
+refreshModelsButton.addEventListener('click', () => {
+  // Add a visual indication that refresh is happening
+  refreshModelsButton.classList.add('refreshing');
+  refreshModelsButton.disabled = true;
+  
+  // Show a system message in the chat
+  addToChatHistory({
+    type: 'system',
+    content: 'Refreshing available models...'
+  });
+  
+  // Fetch the models
+  fetchAvailableModels()
+    .then(() => {
+      // Add success message
+      addToChatHistory({
+        type: 'system',
+        content: 'Model list refreshed successfully!'
+      });
+    })
+    .catch(error => {
+      // Add error message
+      addToChatHistory({
+        type: 'system',
+        content: `Error refreshing models: ${error.message}`
+      });
+    })
+    .finally(() => {
+      // Remove visual indication
+      refreshModelsButton.classList.remove('refreshing');
+      refreshModelsButton.disabled = false;
+    });
+});
+
 // Handle new connections
 swarm.on('connection', conn => {
   const remotePublicKey = b4a.toString(conn.remotePublicKey, 'hex');
@@ -451,81 +503,72 @@ swarm.on('connection', conn => {
 // Create a message element to add to the chat
 function createMessageElement(message) {
   const messageEl = document.createElement('div');
-  messageEl.className = 'message';
+  messageEl.classList.add('message');
+  
+  let messageContent = message.content || '';
   
   switch (message.type) {
-    case 'system':
-      messageEl.className += ' message-system';
-      messageEl.textContent = message.content;
-      break;
+    case 'user': {
+      messageEl.classList.add('user-message');
       
-    case 'user':
-      messageEl.className += ' message-current-peer';
-      
+      let sender = 'You';
       if (message.fromPeer) {
-        // This is a message from a peer
-        messageEl.className = messageEl.className.replace('message-current-peer', 'message-peer');
-        
-        // Add the peer's color class if available
-        if (message.peerId && activePeers.has(message.peerId)) {
-          const peerInfo = activePeers.get(message.peerId);
-          messageEl.className += ` ${peerInfo.colorClass}`;
+        sender = message.fromPeer;
+        if (sender !== 'Host' && sender !== 'You') {
+          messageEl.classList.add('peer-message');
         }
-        
-        // Add header with peer name
-        const header = document.createElement('div');
-        header.className = 'message-header';
-        
-        if (message.peerId && activePeers.has(message.peerId)) {
-          header.textContent = activePeers.get(message.peerId).displayName;
-        } else {
-          header.textContent = message.fromPeer;
-        }
-        
-        messageEl.appendChild(header);
-      } else {
-        // This is a message from the current user
-        const header = document.createElement('div');
-        header.className = 'message-header';
-        header.textContent = 'You';
-        messageEl.appendChild(header);
       }
       
-      const content = document.createElement('div');
-      content.textContent = message.content;
-      messageEl.appendChild(content);
+      // Create header
+      const userHeader = document.createElement('div');
+      userHeader.classList.add('message-header');
+      userHeader.textContent = sender;
+      messageEl.appendChild(userHeader);
+      
+      // Create body
+      const userBody = document.createElement('div');
+      userBody.classList.add('message-body');
+      userBody.textContent = messageContent;
+      messageEl.appendChild(userBody);
       break;
+    }
+    
+    case 'assistant': {
+      messageEl.classList.add('assistant-message');
       
-    case 'assistant':
-      messageEl.className += ' message-assistant';
-      
-      // Add header for assistant
+      // Create header
       const assistantHeader = document.createElement('div');
-      assistantHeader.className = 'message-header';
-      assistantHeader.textContent = 'DeepSeek';
+      assistantHeader.classList.add('message-header');
+      
+      // Changed from hardcoded DeepSeek to using the current selected model name
+      const modelInfo = DEFAULT_MODELS.find(m => m.id === currentModel) || { name: 'AI Assistant' };
+      assistantHeader.textContent = modelInfo.name;
+      
       messageEl.appendChild(assistantHeader);
       
-      // Extract thinking sections
-      let formattedContent = message.content;
+      // Create body with Markdown rendering
+      const assistantBody = document.createElement('div');
+      assistantBody.classList.add('message-body');
       
-      // Replace think tags with formatted HTML
-      formattedContent = formattedContent.replace(/<think>([\s\S]*?)<\/think>/g, function(match, thinkContent) {
-        return `<div class="thinking-section"><div class="thinking-header">Thinking</div>${thinkContent}</div>`;
-      });
+      // Render Markdown if content seems to contain it
+      if (containsMarkdown(messageContent)) {
+        assistantBody.innerHTML = renderMarkdown(messageContent);
+      } else {
+        assistantBody.innerHTML = messageContent.replace(/\n/g, '<br>');
+      }
       
-      // Create content container
-      const assistantContent = document.createElement('div');
-      assistantContent.className = 'markdown-content';
-      
-      // Render Markdown content
-      assistantContent.innerHTML = renderMarkdown(formattedContent);
-      
-      messageEl.appendChild(assistantContent);
+      messageEl.appendChild(assistantBody);
+      break;
+    }
+    
+    case 'system':
+      messageEl.classList.add('system-message');
+      messageEl.textContent = messageContent;
       break;
       
     case 'thinking':
-      messageEl.className += ' message-thinking';
-      messageEl.textContent = message.content;
+      messageEl.classList.add('thinking-message');
+      messageEl.textContent = messageContent;
       break;
       
     default:
@@ -852,6 +895,25 @@ function setupPeerMessageHandler(conn, peerId) {
         });
         break;
         
+      case 'handshake_ack':
+        // Server has acknowledged our handshake
+        console.log('Server acknowledged handshake:', message);
+        
+        // Update the peer information with server ID if available
+        if (message.serverId) {
+          updateActivePeer(peerId, {
+            displayName: 'Server',
+            serverId: message.serverId,
+            isServer: true
+          });
+          
+          addToChatHistory({
+            type: 'system',
+            content: `Connected to server ${message.serverId.slice(0, 8)}...`
+          });
+        }
+        break;
+        
       case 'mode_update':
         // Received update about the host's collaborative/private mode
         console.log(`Host chat mode is set to: ${message.isCollaborativeMode ? 'Collaborative' : 'Private'}`);
@@ -1160,16 +1222,20 @@ topicKeyInput.addEventListener('keydown', (event) => {
 // Form submission handler
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
+  
   const formData = new FormData(form);
+  const prompt = formData.get('prompt').trim();
+  // Get the selected model from the selector
   const model = formData.get('model');
-  const prompt = formData.get('prompt');
+  currentModel = model; // Update the current model
   
-  if (!prompt.trim()) return;
+  if (prompt.length === 0) {
+    return;
+  }
   
-  // Clear prompt area
+  // Clear the prompt area
   promptArea.value = '';
   
-  // Ask LLM
   await ask(model, prompt);
 });
 
@@ -1206,3 +1272,109 @@ chatModeSelect.addEventListener('change', function() {
     }
   }
 }); 
+
+// Function to fetch available models from Ollama
+async function fetchAvailableModels() {
+  try {
+    // Get base URL for Ollama
+    const baseUrl = getOllamaBaseUrl();
+    const modelsUrl = new URL('/api/tags', baseUrl);
+    
+    console.log('Fetching available models directly from Ollama:', modelsUrl.toString());
+    
+    const response = await fetch(modelsUrl);
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    
+    if (data.models && Array.isArray(data.models) && data.models.length > 0) {
+      // Clear existing options
+      modelSelect.innerHTML = '';
+      
+      // Sort models alphabetically
+      const sortedModels = data.models.sort((a, b) => a.name.localeCompare(b.name));
+      
+      // Add fetched models as options
+      sortedModels.forEach(model => {
+        const option = document.createElement('option');
+        option.value = model.name;
+        option.textContent = formatModelName(model.name);
+        
+        // Select current model if it matches
+        if (model.name === currentModel) {
+          option.selected = true;
+        }
+        
+        modelSelect.appendChild(option);
+      });
+      
+      // Update timestamp on refresh button
+      refreshModelsButton.setAttribute('title', `Last refreshed: ${new Date().toLocaleTimeString()}`);
+      
+      console.log(`Loaded ${data.models.length} models from Ollama`);
+    } else {
+      // If no models were returned, fall back to default models
+      populateDefaultModels();
+      console.log('No models returned from Ollama, using defaults');
+    }
+  } catch (error) {
+    console.error('Error fetching models from Ollama:', error);
+    // Fall back to default models on error
+    populateDefaultModels();
+    throw error;
+  }
+}
+
+// Format model name for better display
+function formatModelName(modelId) {
+  try {
+    // Try to create a readable name from the model ID
+    if (!modelId) return 'Unknown Model';
+    
+    // Split by colon to separate model name and size
+    const parts = modelId.split(':');
+    const baseName = parts[0];
+    
+    // Capitalize and format the base name
+    let formattedName = baseName
+      .split(/[-_]/)
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+    
+    // Add size if available
+    if (parts.length > 1) {
+      formattedName += ` (${parts[1]})`;
+    }
+    
+    return formattedName;
+  } catch (error) {
+    console.error('Error formatting model name:', error);
+    return modelId || 'Unknown Model';
+  }
+}
+
+// Populate the model select with default models
+function populateDefaultModels() {
+  // Clear existing options
+  modelSelect.innerHTML = '';
+  
+  // Add default models
+  DEFAULT_MODELS.forEach(model => {
+    const option = document.createElement('option');
+    option.value = model.id;
+    option.textContent = model.name;
+    
+    // Select current model if it matches
+    if (model.id === currentModel) {
+      option.selected = true;
+    }
+    
+    modelSelect.appendChild(option);
+  });
+  
+  // Update timestamp on refresh button
+  refreshModelsButton.setAttribute('title', 'Failed to load models from Ollama. Using defaults.');
+}

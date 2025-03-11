@@ -219,11 +219,93 @@
     }
     
     .user-chip .status-indicator {
-      width: 6px;
-      height: 6px;
+      width: 8px;
+      height: 8px;
       border-radius: 50%;
-      margin-right: 5px;
       background-color: #A3BE8C;
+      margin-right: 5px;
+      display: inline-block;
+    }
+    
+    #model-select {
+      background-color: #2E3440;
+      color: #fff;
+      border: 1px solid #434C5E;
+      border-radius: 4px;
+      padding: 6px 10px;
+      font-size: 14px;
+      margin-right: 8px;
+      -webkit-appearance: none;
+      appearance: none;
+      background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23D8DEE9' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 8px center;
+      background-size: 16px;
+      padding-right: 30px;
+      cursor: pointer;
+    }
+    
+    #model-select:focus {
+      outline: none;
+      border-color: #5E81AC;
+      box-shadow: 0 0 0 2px rgba(136, 192, 208, 0.3);
+    }
+    
+    .model-control {
+      display: flex;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    
+    .model-control label {
+      font-size: 14px;
+      margin-right: 8px;
+      color: #D8DEE9;
+    }
+    
+    #refresh-models {
+      background-color: #4C566A;
+      color: #E5E9F0;
+      border: none;
+      border-radius: 4px;
+      padding: 6px 10px;
+      font-size: 14px;
+      cursor: pointer;
+      margin-left: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    #refresh-models:hover {
+      background-color: #5E81AC;
+    }
+    
+    #refresh-models svg {
+      width: 14px;
+      height: 14px;
+    }
+    
+    #refresh-models.refreshing {
+      background-color: #5E81AC;
+      pointer-events: none;
+    }
+    
+    #refresh-models.refreshing svg {
+      animation: spin 1s linear infinite;
+    }
+    
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    
+    form {
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      background-color: #232834;
+      border-top: 1px solid #3B4252;
     }
     
     textarea {
@@ -235,17 +317,6 @@
       font-size: 14px;
       margin: 4px;
       border-radius: 4px;
-    }
-    
-    form {
-      display: flex;
-      flex-direction: column;
-      margin: 0 4px 4px 4px;
-    }
-    
-    form textarea {
-      height: 60px;
-      margin: 0 0 4px 0;
     }
     
     input {
@@ -454,11 +525,28 @@
   </div>
   
   <form>
-    <textarea name="prompt"></textarea>
-    <div style="float:right">
-      <input name="model" value="deepseek-r1:1.5b">
-      <input type="submit" value="Seek">
+    <div class="model-control">
+      <label for="model-select">Model:</label>
+      <select id="model-select" name="model">
+        <option value="deepseek-r1:1.5b">DeepSeek 1.5b</option>
+        <option value="llama2:7b">Llama 2 7B</option>
+        <option value="mistral:7b">Mistral 7B</option>
+        <option value="phi:2.7b">Phi-2 2.7B</option>
+        <option value="gemma:7b">Gemma 7B</option>
+      </select>
+      <button type="button" id="refresh-models" title="Refresh model list">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M23 4v6h-6"></path>
+          <path d="M1 20v-6h6"></path>
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"></path>
+          <path d="M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+        </svg>
+      </button>
+    </div>
+    <textarea name="prompt" placeholder="Type your message here... (Ctrl+Enter to send)"></textarea>
+    <div style="float:right; margin-top: 8px;">
+      <input type="submit" value="Seek" style="background-color: #5E81AC; border: none; padding: 8px 15px; border-radius: 4px; color: white; cursor: pointer;">
     </div>
   </form>
 </body>
-</html> 
+</html>
