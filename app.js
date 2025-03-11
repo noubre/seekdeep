@@ -398,8 +398,10 @@ function leaveExistingChat() {
 // Initialize a new chat session by default
 initializeNewChat();
 
-// Fetch available models from Ollama
-fetchAvailableModels();
+// Fetch available models from Ollama (only if we're not trying to join an existing session)
+if (!window.location.hash) {
+  fetchAvailableModels();
+}
 
 // Add event listener for the refresh models button
 refreshModelsButton.addEventListener('click', () => {
@@ -412,6 +414,19 @@ refreshModelsButton.addEventListener('click', () => {
     type: 'system',
     content: 'Refreshing available models...'
   });
+  
+  // If we're connected as a peer to a host, we should request models from the host
+  if (!isSessionHost && window.usingHostModels) {
+    addToChatHistory({
+      type: 'system',
+      content: 'Using models from host. No refresh needed.'
+    });
+    
+    // Remove refresh indication
+    refreshModelsButton.classList.remove('refreshing');
+    refreshModelsButton.disabled = false;
+    return;
+  }
   
   // Fetch the models
   fetchAvailableModels()
@@ -893,9 +908,16 @@ function setupPeerMessageHandler(conn, peerId) {
         if (isSessionHost) {
           // Get models from our local instance to share with peer
           fetchAvailableModels(true).then(models => {
+            // Transform the models to match the format expected by updateModelSelect
+            const formattedModels = models.map(model => ({
+              name: model.name,
+              id: model.name,
+              modified_at: model.modified_at
+            }));
+            
             conn.write(JSON.stringify({
               type: 'models_update',
-              models: models
+              models: formattedModels
             }));
           }).catch(err => {
             console.error('Error fetching models to share with peer:', err);
@@ -952,9 +974,12 @@ function setupPeerMessageHandler(conn, peerId) {
           // Update our models dropdown with the host's models
           updateModelSelect(message.models);
           
+          // Store the current model to avoid local model fetching overriding host models
+          window.usingHostModels = true;
+          
           addToChatHistory({
             type: 'system',
-            content: `Received ${message.models.length} models from host`
+            content: `Received ${message.models.length} models from host. Using host's models.`
           });
         }
         break;
