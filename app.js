@@ -12,8 +12,6 @@ const promptArea = document.querySelector('textarea[name="prompt"]');
 const topicKeyInput = document.getElementById('topic-key');
 const joinButton = document.getElementById('join-button');
 const chatModeSelect = document.getElementById('chat-mode');
-const modelSelect = document.getElementById('model-select');
-const refreshModelsButton = document.getElementById('refresh-models');
 
 // Configure marked.js for secure Markdown rendering
 marked.setOptions({
@@ -616,12 +614,6 @@ async function ask(model, prompt) {
       content: prompt
     });
     
-    // Add a subtle system message showing which model is being used
-    addToChatHistory({
-      type: 'system',
-      content: `Using model: ${model}`
-    });
-    
     // Check if we need to send the query to a specific peer (when joining)
     let targetPeerId = null;
     if (!isSessionHost && !isCollaborativeMode && conns.length > 0) {
@@ -1142,107 +1134,6 @@ async function queryLocalLLM(model, prompt) {
   }
 }
 
-// Function to fetch available models from Ollama
-async function fetchAvailableModels() {
-  try {
-    const baseUrl = getOllamaBaseUrl();
-    const url = new URL('/api/tags', baseUrl);
-    
-    console.log('Fetching available models from URL:', url.toString());
-    
-    const response = await fetch(url);
-    
-    if (!response.ok) {
-      throw new Error(`HTTP error: ${response.status}`);
-    }
-    
-    const data = await response.json();
-    return data.models || [];
-  } catch (error) {
-    console.error('Error fetching available models:', error);
-    // Return a default model in case of error
-    return [{ name: 'deepseek-r1:1.5b' }];
-  }
-}
-
-// Function to populate the model dropdown
-async function populateModelDropdown() {
-  try {
-    // Show loading state
-    modelSelect.innerHTML = '<option value="">Loading models...</option>';
-    
-    // Fetch available models
-    const models = await fetchAvailableModels();
-    
-    // Clear loading state
-    modelSelect.innerHTML = '';
-    
-    // Add default DeepSeek model (in case it's not in the list)
-    let hasDeepSeek = false;
-    
-    // Add each model to the dropdown
-    models.forEach(model => {
-      const option = document.createElement('option');
-      option.value = model.name;
-      
-      // Format the display name to be more user-friendly
-      let displayName = model.name;
-      if (displayName.includes(':')) {
-        // Split at colon to separate model family and size/variant
-        const parts = displayName.split(':');
-        displayName = `${parts[0]} (${parts[1]})`;
-      }
-      
-      option.textContent = displayName;
-      modelSelect.appendChild(option);
-      
-      // Check if we have the DeepSeek model
-      if (model.name === 'deepseek-r1:1.5b') {
-        hasDeepSeek = true;
-        option.selected = true; // Set as default
-      }
-    });
-    
-    // If DeepSeek is not in the list, add it as a default option
-    if (!hasDeepSeek && models.length > 0) {
-      const option = document.createElement('option');
-      option.value = 'deepseek-r1:1.5b';
-      option.textContent = 'DeepSeek (1.5B)';
-      modelSelect.insertBefore(option, modelSelect.firstChild);
-      option.selected = true;
-    }
-    
-    // Add a message to the chat if no models are available
-    if (models.length === 0) {
-      addToChatHistory({
-        type: 'system',
-        content: 'No models found in Ollama. Please make sure Ollama is running and you have models installed.'
-      });
-      
-      // Add a default option
-      const option = document.createElement('option');
-      option.value = 'deepseek-r1:1.5b';
-      option.textContent = 'DeepSeek (1.5B)';
-      modelSelect.appendChild(option);
-    }
-  } catch (error) {
-    console.error('Error populating model dropdown:', error);
-    
-    // Show error in dropdown
-    modelSelect.innerHTML = '';
-    const option = document.createElement('option');
-    option.value = 'deepseek-r1:1.5b';
-    option.textContent = 'DeepSeek (1.5B) - Error loading models';
-    modelSelect.appendChild(option);
-    
-    // Add error message to chat
-    addToChatHistory({
-      type: 'system',
-      content: `Error loading models: ${error.message}. Using default model.`
-    });
-  }
-}
-
 // Join button click event handler
 joinButton.addEventListener('click', () => {
   const topicKeyHex = topicKeyInput.value.trim();
@@ -1315,11 +1206,3 @@ chatModeSelect.addEventListener('change', function() {
     }
   }
 }); 
-
-// Populate model dropdown on load
-populateModelDropdown();
-
-// Refresh models button click handler
-refreshModelsButton.addEventListener('click', () => {
-  populateModelDropdown();
-});
