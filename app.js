@@ -888,6 +888,19 @@ function setupPeerMessageHandler(conn, peerId) {
           type: 'mode_update',
           isCollaborativeMode: isCollaborativeMode
         }));
+
+        // If we're the host, share our models with the peer
+        if (isSessionHost) {
+          // Get models from our local instance to share with peer
+          fetchAvailableModels(true).then(models => {
+            conn.write(JSON.stringify({
+              type: 'models_update',
+              models: models
+            }));
+          }).catch(err => {
+            console.error('Error fetching models to share with peer:', err);
+          });
+        }
         
         addToChatHistory({
           type: 'system',
@@ -928,6 +941,20 @@ function setupPeerMessageHandler(conn, peerId) {
           addToChatHistory({
             type: 'system',
             content: `Chat mode set to ${isCollaborativeMode ? 'Collaborative (shared chat)' : 'Private (separate chats)'}.`
+          });
+        }
+        break;
+        
+      case 'models_update':
+        // Received models list from the host
+        console.log('Received models from host:', message.models);
+        if (!isSessionHost && message.models && Array.isArray(message.models)) {
+          // Update our models dropdown with the host's models
+          updateModelSelect(message.models);
+          
+          addToChatHistory({
+            type: 'system',
+            content: `Received ${message.models.length} models from host`
           });
         }
         break;
@@ -1274,7 +1301,7 @@ chatModeSelect.addEventListener('change', function() {
 }); 
 
 // Function to fetch available models from Ollama
-async function fetchAvailableModels() {
+async function fetchAvailableModels(returnModelsOnly = false) {
   try {
     // Get base URL for Ollama
     const baseUrl = getOllamaBaseUrl();
@@ -1291,6 +1318,11 @@ async function fetchAvailableModels() {
     const data = await response.json();
     
     if (data.models && Array.isArray(data.models) && data.models.length > 0) {
+      // If we only need to return the models, don't update the UI
+      if (returnModelsOnly) {
+        return data.models;
+      }
+      
       // Clear existing options
       modelSelect.innerHTML = '';
       
@@ -1315,15 +1347,31 @@ async function fetchAvailableModels() {
       refreshModelsButton.setAttribute('title', `Last refreshed: ${new Date().toLocaleTimeString()}`);
       
       console.log(`Loaded ${data.models.length} models from Ollama`);
+      
+      // Also return the models if requested
+      if (returnModelsOnly) {
+        return data.models;
+      }
     } else {
       // If no models were returned, fall back to default models
       populateDefaultModels();
       console.log('No models returned from Ollama, using defaults');
+      
+      // Return default models if requested
+      if (returnModelsOnly) {
+        return DEFAULT_MODELS;
+      }
     }
   } catch (error) {
     console.error('Error fetching models from Ollama:', error);
     // Fall back to default models on error
     populateDefaultModels();
+    
+    // Return default models if requested
+    if (returnModelsOnly) {
+      return DEFAULT_MODELS;
+    }
+    
     throw error;
   }
 }
@@ -1377,4 +1425,27 @@ function populateDefaultModels() {
   
   // Update timestamp on refresh button
   refreshModelsButton.setAttribute('title', 'Failed to load models from Ollama. Using defaults.');
+}
+
+// Update the model select with new models
+function updateModelSelect(models) {
+  // Clear existing options
+  modelSelect.innerHTML = '';
+  
+  // Sort models alphabetically
+  const sortedModels = models.sort((a, b) => a.name.localeCompare(b.name));
+  
+  // Add fetched models as options
+  sortedModels.forEach(model => {
+    const option = document.createElement('option');
+    option.value = model.name;
+    option.textContent = formatModelName(model.name);
+    
+    // Select current model if it matches
+    if (model.name === currentModel) {
+      option.selected = true;
+    }
+    
+    modelSelect.appendChild(option);
+  });
 }
