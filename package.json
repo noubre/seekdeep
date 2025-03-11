@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "b4a": "^1.6.4",
+    "express": "^4.18.2",
     "holesail-client": "^1.1.7",
     "holesail-server": "^1.4.4",
     "hypercore": "^10.0.0",
