@@ -29,7 +29,7 @@ Before running SeekDeep, make sure you have:
 
 1. Clone this repository:
    ```bash
-   git clone https://github.com/holepunchto/seekdeep.git
+   git clone https://github.com/noubre/seekdeep.git
    cd seekdeep
    ```
 
@@ -103,16 +103,38 @@ When using SeekDeep in a peer-to-peer setup:
 
 This ensures that all peers have access to the same models available on the host machine, regardless of what models they have installed locally.
 
-### Collaboration Modes
+## Collaboration Modes
 
 SeekDeep offers two collaboration modes when interacting with peers:
 
 - **Collaborative Mode**: When a peer sends a query to the host's LLM, both the message and response are visible to everyone in the chat. All peers see all conversations.
-- **Individual Mode**: When a peer sends a query, the message and response are only visible to that peer, keeping each user's conversation private. (Not tested fully yet)
+- **Individual Mode**: When a peer sends a query, the message and response are only visible to that peer, keeping each user's conversation private.
 
-Only the host can switch between modes using the dropdown in the UI. As a host, when you change modes, all connected peers chat modes be updated automatically.
+Only the host can switch between modes using the dropdown in the UI. As a host, when you change modes, all connected peers' chat modes are updated automatically.
 
-### Keyboard Shortcuts (Not tested)
+### Collaboration Flow
+
+1. **Host Sets Mode**: The host selects either collaborative or private mode using the dropdown
+2. **Mode Broadcast**: The selection is automatically broadcast to all connected peers
+3. **UI Update**: All peers receive a system message confirming the current mode
+4. **Message Routing**: 
+   - In collaborative mode: all messages and responses are shared with all peers
+   - In private mode: each peer only sees their own messages and responses
+
+### User Experience 
+
+In collaborative mode, the application creates a shared workspace where:
+- All users can see queries from other users
+- All users can see responses to any query
+- Messages are color-coded and labeled with the sender's name
+- The chat history becomes a collective resource
+
+In private mode:
+- Each peer has a private conversation with the LLM
+- The host still processes all queries but doesn't share responses
+- The UI clearly indicates that conversations are private
+
+## Keyboard Shortcuts
 
 - **Ctrl/Cmd + Enter**: Submit the current prompt
 - **Enter**: Submit the current prompt (unless Shift is held)
@@ -141,6 +163,31 @@ Only the host can switch between modes using the dropdown in the UI. As a host, 
 - No clustering or sharding of conversations
 - No persistence of chat history between sessions
 
+## Troubleshooting
+
+### Common Issues
+
+1. **Unknown Message Type**
+   - **Symptom**: Console errors showing "Unknown message type" 
+   - **Solution**: Ensure both host and peers are running the same version of the application. Refresh browser windows to load the latest code.
+
+2. **Model Dropdown Not Updating**
+   - **Symptom**: Peer's model dropdown doesn't show host's models
+   - **Solution**: Click the refresh button next to the model dropdown to request models from the host
+
+3. **Ollama Connection Errors**
+   - **Symptom**: "Failed to fetch" errors in console
+   - **Solution**: Make sure Ollama is running on port 11434 and you have the requested models installed
+
+## Compatibility with Pear Runtime
+
+This implementation is specifically designed to work with Pear Runtime's Bare environment:
+
+- Avoids using Node.js native modules that aren't supported in Bare
+- Uses a direct P2P implementation with Hyperswarm instead of relying on third-party proxying libraries
+- Implements a custom messaging protocol over the raw P2P connections
+- Efficiently manages peer connections and message routing
+
 ## System Architecture
 
 ### High-Level Components
@@ -166,7 +213,9 @@ Only the host can switch between modes using the dropdown in the UI. As a host, 
    | - User input form             |     | - Peer connections        |      | - Markdown parser       |
    | - Mode toggle                 |     | - Message handlers        |      | - Response formatter    |
    | - Active user list            |     | - Data serialization      |      | - Query processor       |
-   |                               |     | - Mode management         |      |                          |
+   | - Model selector              |     | - Mode management         |      | - Model sharing         |
+   | - Refresh models button       |     | - Model distribution      |      |                          |
+   |                               |     |                           |      |                          |
    +-------------------------------+     +---------------------------+      +--------------------------+
                   |                                  |                                   |
                   |                                  |                                   |
@@ -178,7 +227,9 @@ Only the host can switch between modes using the dropdown in the UI. As a host, 
     | - updateChatDisplay()        |      | - setupPeerMessageHandler|      | - handlePeerQuery()     |
     | - renderMarkdown()           |      | - handleMessage()        |      | - parseOllamaResponse() |
     | - updateActiveUsersDisplay() |      | - leaveExistingChat()    |      | - containsMarkdown()    |
-    |                              |      | - broadcastToPeers()     |      |                          |
+    | - updateModelSelect()        |      | - broadcastToPeers()     |      | - fetchAvailableModels()|
+    | - requestModelsFromHost()    |      | - handleModelRequest()   |      | - getAvailableModels()  |
+    |                              |      |                          |      |                          |
     +------------------------------+      +--------------------------+      +--------------------------+
 ```
 
@@ -196,250 +247,166 @@ Only the host can switch between modes using the dropdown in the UI. As a host, 
          +------------------------------|-------------------------------+
                                         |
                                         v
-                           +------------+------------+
-                           |                         |
-                           |    Mode Selection       |
-                           |                         |
-                           +--------------------------+
-                                        |
-                  +-------------------+--------------------+
-                  |                                        |
-       +----------v----------+              +-------------v--------------+
-       |                     |              |                            |
-       | Collaborative Mode  |              |        Private Mode        |
-       | (All peers see all  |              |   (Each peer only sees     |
-       |  messages)          |              |    their own messages)     |
-       +---------------------+              +----------------------------+
+                 +-------------------+--+-----------------+------------------+
+                 |                   |                    |                  |
+      +----------v----------+  +----v---------------+ +--v------------------+
+      |                     |  |                    | |                     |
+      |   Models Sharing    |  |   Mode Selection   | |   Message Relay     |
+      | (Host -> Peers)     |  |                    | | (Peers <-> Peers)   |
+      +----------+----------+  +----+---------------+ +--+------------------+
+                 |                  |                    |
+                 v                  v                    v
+      +----------+----------+  +----+---------------+ +--+------------------+
+      |                     |  |                    | |                     |
+      | Refresh On Demand   |  | Collaborative Mode | | Private Mode        |
+      | (Peer -> Host)      |  | (All peers see all | | (Each peer only sees|
+      |                     |  |  messages)         | |  their own messages)|
+      +---------------------+  +--------------------+ +---------------------+
 ```
 
-### Multi-Peer Communication Flow
+### Message Flow Between Components
 
 ```
-                      +---------------------+
-                      |                     |
-                      |        Host         |
-                      |                     |
-                      +-----+-------+-------+
-                            |       |
-               +------------+       +------------+
-               |                                 |
-     +---------v----------+             +--------v-----------+
-     |                    |             |                    |
-     |      Peer 1        |             |      Peer 2        |
-     |                    |             |                    |
-     +--------------------+             +--------------------+
-               |                                 |
-               |           Collaborative         |
-               |            Mode Only            |
-               +--------------->-----------------+
++------------------+                   +------------------+                  +------------------+
+|                  |  1. model_request |                  | 2. Query Ollama  |                  |
+|      Peer        +------------------>+      Host        +----------------->+     Ollama API   |
+|                  |                   |                  |                  |                  |
++--------^---------+                   +--------^---------+                  +--------+---------+
+         |                                      |                                     |
+         | 4. Update UI                         | 3. models_update                    |
+         |                                      |                                     |
+         +--------------------------------------+-------------------------------------+
+                                                
++------------------+                   +------------------+                  +------------------+
+|                  |  1. peer_message  |                  | 2. Forward       |                  |
+|      Peer A      +------------------>+      Server      +----------------->+     Peer B       |
+|                  |                   |                  |                  |                  |
++------------------+                   +------------------+                  +------------------+
 ```
 
-### Connection and Message Routing
+## Implementation Details
 
-```
-                   +----------------------+
-                   |                      |
-                   |  Hyperswarm Network  |
-                   |                      |
-                   +----^--------------^--+
-                        |              |
-            +-----------+              +-----------+
-            |                                      |
- +----------v-----------+              +-----------v----------+
- |                      |              |                      |
- |  Host Connection     |              |  Peer Connection     |
- |  Management          |              |  Management          |
- |                      |              |                      |
- +----------+-----------+              +-----------+----------+
-            |                                      |
- +----------v-----------+              +-----------v----------+
- |                      |              |                      |
- |  Message Handling    +<------------>+  Message Handling    |
- |  & Routing           |              |  & Routing           |
- |                      |              |                      |
- +----------+-----------+              +-----------+----------+
-            |                                      |
-            |                                      |
- +----------v-----------+              +-----------v----------+
- |                      |              |                      |
- |  Local LLM           |              |  UI Display          |
- |  Integration         |              |  & Chat History      |
- |                      |              |                      |
- +----------------------+              +----------------------+
-```
+### Model Sharing Protocol
 
-## P2P Networking Architecture
+The model sharing protocol consists of these key message types:
 
-SeekDeep uses a direct P2P approach that's compatible with Pear Runtime's Bare environment:
+1. **handshake**: When a peer connects, host automatically shares available models
+2. **model_request**: Peer can request models from host (triggered by refresh button)
+3. **models_update**: Host sends available models to peers (response to handshake or model_request)
 
-### Server Side (server.js)
-- Uses Hyperswarm to make your server discoverable on the P2P network
-- Generates a public key for identification
-- Handles incoming P2P connections and routes LLM queries to Ollama
-- Streams responses back to clients
+When a peer connects to a host:
+1. The host fetches its local Ollama models 
+2. The host sends models to the peer using the models_update message
+3. The peer updates its UI to show the host's models
+4. The peer sets a flag to prevent fetching local models
 
-### Client Side (app.js)
-- Uses Hyperswarm to discover available peers
-- Implements a message protocol for P2P communication with proper routing
-- Host processes LLM queries locally, joiners route through the host
-- Supports both collaborative and private chat modes with appropriate message visibility
-- Handles peer connection management including connection establishment and teardown
-
-## P2P Protocol for LLM Capability Sharing
-
-The application implements a custom message-based protocol over Hyperswarm connections to enable seamless LLM capability sharing between peers:
+Peers can also request updated models by clicking the refresh button, which:
+1. Sends a model_request message to the host
+2. Host fetches current models and sends a models_update response
+3. Peer updates the UI with the latest models
 
 ### Message Types
 
-| Message Type | Direction | Purpose |
-|--------------|-----------|---------|
-| `handshake` | Bidirectional | Establishes initial connection and exchanges peer information |
-| `mode_update` | Host → Peers | Informs peers about collaborative/private mode changes |
-| `query` | Peer → Host | Forwards LLM query from peer to host for processing |
-| `response` | Host → Peer | Returns LLM response to the originating peer |
-| `peer_message` | Any → All | Broadcasts user messages and LLM responses in collaborative mode |
+| Message Type    | Purpose                                   | Direction        |
+|-----------------|-------------------------------------------|------------------|
+| handshake       | Initialize connection                     | Peer → Host      |
+| handshake_ack   | Acknowledge connection                    | Host → Peer      |
+| models_update   | Share available models                    | Host → Peer      |
+| model_request   | Request available models                  | Peer → Host      |
+| query           | Send LLM query                            | Peer → Host      |
+| response        | Stream LLM response                       | Host → Peer      |
+| mode_update     | Change collaboration mode                 | Host → Peer      |
+| peer_message    | Relay messages between peers              | Peer ↔ Peer      |
 
-### Protocol Flow
+### Message Examples
 
-1. **Connection Establishment**
-   ```
-   Peer                                  Host
-    |                                     |
-    |------- connection established ----→|
-    |                                     |
-    |---------- handshake --------------→|
-    |                                     |
-    |←--------- handshake_ack -----------|
-    |                                     |
-    |←--------- mode_update -------------|
-    |                                     |
-   ```
+Below are examples of the actual JSON message structures used in the P2P communication:
 
-2. **LLM Query Processing**
-   ```
-   Peer                                  Host                               Ollama API
-    |                                     |                                     |
-    |---------- query ------------------→|                                     |
-    |                                     |---------- LLM request -----------→|
-    |                                     |                                     |
-    |                                     |←--------- LLM response -----------|
-    |                                     |                                     |
-    |←--------- response -----------------|                                     |
-    |            or                       |                                     |
-    |←- peer_message (in collab. mode) --|--→ other peers (in collab. mode)    |
-    |                                     |                                     |
-   ```
-
-### Message Structure
-
-All messages use JSON serialization and share a common structure:
-
-```json
-{
-  "type": "[message_type]",   // One of the message types listed above
-  "requestId": "1234567890",  // Unique ID to correlate requests and responses
-  ... message-specific fields ...
-}
-```
-
-#### Handshake Message
+#### Handshake Message (Peer → Host)
 ```json
 {
   "type": "handshake",
-  "clientId": "a1b2c3d4...",    // Public key of the peer
-  "displayName": "You",         // How the peer identifies itself
-  "timestamp": 1621234567890    // Connection time
+  "clientId": "a1b2c3d4e5f6...",
+  "displayName": "Peer1"
 }
 ```
 
-#### Mode Update Message
+#### Handshake Acknowledgment (Host → Peer)
 ```json
 {
-  "type": "mode_update",
-  "isCollaborativeMode": true   // Whether collaborative mode is enabled
+  "type": "handshake_ack",
+  "status": "connected",
+  "hostId": "z9y8x7w6v5u...",
+  "isCollaborativeMode": true
 }
 ```
 
-#### Query Message
+#### Models Update Message (Host → Peer)
+```json
+{
+  "type": "models_update",
+  "models": [
+    {
+      "name": "llama2:7b",
+      "modified_at": "2025-03-01T10:30:45.000Z",
+      "size": 4200000000,
+      "digest": "sha256:a1b2c3..."
+    },
+    {
+      "name": "deepseek-coder:6.7b",
+      "modified_at": "2025-03-05T14:22:10.000Z",
+      "size": 3800000000,
+      "digest": "sha256:d4e5f6..."
+    }
+  ]
+}
+```
+
+#### Model Request Message (Peer → Host)
+```json
+{
+  "type": "model_request"
+}
+```
+
+#### Query Message (Peer → Host)
 ```json
 {
   "type": "query",
-  "requestId": "1621234567890",
-  "model": "deepseek-r1:1.5b",  // LLM model to use
-  "prompt": "User's query text",
-  "fromPeerId": "a1b2c3d4..."   // Sender's public key
+  "model": "llama2:7b",
+  "prompt": "Explain quantum computing in simple terms",
+  "requestId": "req_1234567890",
+  "fromPeerId": "a1b2c3d4e5f6..."
 }
 ```
 
-#### Response Message
+#### Response Message (Host → Peer)
 ```json
 {
   "type": "response",
-  "requestId": "1621234567890",
-  "data": "LLM response text",
-  "isComplete": true,           // Whether this is the final chunk of response
-  "isJson": false,              // Whether data is raw JSON or parsed text
-  "isPrivate": false,           // Whether response is private to requestor
-  "fromPeerId": "a1b2c3d4..."   // Original requestor's public key
+  "data": "Quantum computing uses quantum bits or qubits...",
+  "requestId": "req_1234567890",
+  "isComplete": false,
+  "fromPeerId": "a1b2c3d4e5f6..."
 }
 ```
 
-#### Peer Message
+#### Mode Update Message (Host → Peer)
+```json
+{
+  "type": "mode_update",
+  "isCollaborativeMode": true
+}
+```
+
+#### Peer Message (Peer → Server → Other Peers)
 ```json
 {
   "type": "peer_message",
-  "messageType": "user",        // "user" or "assistant"
-  "content": "Message content",
-  "fromPeer": "Peer1",          // Display name of originating peer
-  "requestId": "1621234567890",
-  "isComplete": false           // For streaming responses
+  "content": {
+    "type": "user",
+    "fromPeer": "Peer1",
+    "message": "Hello, can someone help me understand transformers?",
+    "timestamp": 1647382941253
+  }
 }
-```
-
-### Mode-Specific Behavior
-
-#### Collaborative Mode
-- All peer queries and responses are broadcast to all connected peers
-- Each peer sees all conversations with the LLM
-- Messages include peer identification for UI attribution
-
-#### Private Mode
-- Queries and responses are only exchanged between the requesting peer and host
-- The `isPrivate` flag is set to `true` in responses
-- Peers only see their own interactions with the LLM
-
-### Error Handling
-
-The protocol implements several error-handling mechanisms:
-
-- **Connection Errors**: Connections are re-established automatically when disrupted
-- **Query Errors**: Error responses include descriptive messages for debugging
-- **Timeouts**: Queries without responses are eventually abandoned
-- **Deduplication**: Multiple identical messages are filtered out
-
-### Protocol Extensions
-
-The protocol is designed to be extensible for future features:
-
-- **Streaming Responses**: Chunked delivery with the `isComplete` flag
-- **Message Filtering**: Support for content moderation and filtering
-- **Capability Discovery**: Mechanism for peers to announce supported models
-
-## Key Features Explained
-
-### Markdown Rendering
-The application uses the marked.js library to parse and render Markdown in LLM responses. This provides:
-- Formatted text with headers, bold, italic, etc.
-- Code blocks with proper formatting
-- Lists, tables, and other structured content
-- Links and images
-
-### Peer Identification
-Each user in the system is identified as:
-- The current user sees themselves as "You"
-- Other peers are labeled as "Peer1", "Peer2", etc.
-- Each peer is assigned a unique color for easy visual identification
-
-## Compatibility with Pear Runtime
-
-// ... existing compatibility documentation ... 
