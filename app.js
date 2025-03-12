@@ -476,6 +476,7 @@ swarm.on('connection', conn => {
   // Handle incoming data
   conn.on('data', data => {
     try {
+      console.log(`[PEER] Received data from peer: ${remotePublicKey.slice(0, 8)}... (${data.length} bytes)`);
       messageHandler(data);
     } catch (err) {
       console.error('Error handling peer message:', err);
@@ -869,7 +870,7 @@ async function ask(model, prompt) {
 function setupPeerMessageHandler(conn, peerId) {
   return function handleMessage(data) {
     const message = JSON.parse(data.toString());
-    console.log('Received message from peer:', message);
+    console.log(`[PEER] Message from ${peerId.slice(0, 8)}... - Type: ${message.type}`, message);
     
     switch (message.type) {
       case 'handshake':
@@ -967,7 +968,9 @@ function setupPeerMessageHandler(conn, peerId) {
         
       case 'models_update':
         // Received models list from the host
-        console.log('Received models from host:', message.models);
+        console.log(`[PEER] Received ${message.models ? message.models.length : 0} models from host:`, 
+          message.models ? message.models.map(m => m.name).join(', ') : 'No models');
+        
         if (!isSessionHost && message.models && Array.isArray(message.models)) {
           // Update our models dropdown with the host's models
           updateModelSelect(message.models);
@@ -1512,6 +1515,8 @@ function updateModelSelect(models) {
 function requestModelsFromHost() {
   // Only proceed if we're connected to a host and not the host ourselves
   if (!isSessionHost && conns.length > 0) {
+    console.log('[PEER] Requesting models from host...');
+    
     addToChatHistory({
       type: 'system',
       content: 'Requesting models from host...'
@@ -1524,7 +1529,10 @@ function requestModelsFromHost() {
       timestamp: Date.now()
     }));
     
+    console.log('[PEER] Model request sent to host');
     return true;
   }
+  
+  console.log('[PEER] Not connected to host or we are the host, skipping model request');
   return false;
 }
