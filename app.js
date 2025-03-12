@@ -416,16 +416,12 @@ refreshModelsButton.addEventListener('click', () => {
   });
   
   // If we're connected as a peer to a host, we should request models from the host
-  if (!isSessionHost && window.usingHostModels) {
-    addToChatHistory({
-      type: 'system',
-      content: 'Using models from host. No refresh needed.'
-    });
-    
-    // Remove refresh indication
-    refreshModelsButton.classList.remove('refreshing');
-    refreshModelsButton.disabled = false;
-    return;
+  if (!isSessionHost && conns.length > 0) {
+    // Request models from the host
+    if (requestModelsFromHost()) {
+      // The actual refresh will happen when we receive the models from the host
+      return;
+    }
   }
   
   // Fetch the models
@@ -768,6 +764,8 @@ async function ask(model, prompt) {
           
           try {
             const json = JSON.parse(line);
+            console.log("Parsed JSON line:", json);
+            
             if (json.response) {
               // Skip newlines at the beginning if the content is empty
               if (assistantMessage.content === '' && json.response.trim() === '') {
@@ -974,8 +972,15 @@ function setupPeerMessageHandler(conn, peerId) {
           // Update our models dropdown with the host's models
           updateModelSelect(message.models);
           
-          // Store the current model to avoid local model fetching overriding host models
+          // Store the flag that we're using host models to avoid local fetching
           window.usingHostModels = true;
+          
+          // Remove refresh indication if it was from a refresh button click
+          refreshModelsButton.classList.remove('refreshing');
+          refreshModelsButton.disabled = false;
+          
+          // Update timestamp on refresh button
+          refreshModelsButton.setAttribute('title', `Last refreshed from host: ${new Date().toLocaleTimeString()}`);
           
           addToChatHistory({
             type: 'system',
@@ -995,6 +1000,34 @@ function setupPeerMessageHandler(conn, peerId) {
             content: message.prompt,
             fromPeer: activePeers.has(peerId) ? activePeers.get(peerId).displayName : `Peer${peerId.slice(0, 6)}`,
             peerId: peerId
+          });
+        }
+        break;
+        
+      case 'model_request':
+        // Peer is requesting our models
+        console.log('Peer requested models');
+        
+        // Only respond if we're the host
+        if (isSessionHost) {
+          // Get models from our local instance to share with peer
+          fetchAvailableModels(true).then(models => {
+            // Transform the models to match the format expected by updateModelSelect
+            const formattedModels = models.map(model => ({
+              name: model.name,
+              id: model.name,
+              modified_at: model.modified_at
+            }));
+            
+            // Send models to the requesting peer
+            conn.write(JSON.stringify({
+              type: 'models_update',
+              models: formattedModels
+            }));
+            
+            console.log('Sent models to peer in response to request');
+          }).catch(err => {
+            console.error('Error fetching models for peer request:', err);
           });
         }
         break;
@@ -1473,4 +1506,25 @@ function updateModelSelect(models) {
     
     modelSelect.appendChild(option);
   });
+}
+
+// Add function to request models from the host
+function requestModelsFromHost() {
+  // Only proceed if we're connected to a host and not the host ourselves
+  if (!isSessionHost && conns.length > 0) {
+    addToChatHistory({
+      type: 'system',
+      content: 'Requesting models from host...'
+    });
+    
+    // Send a model request to the first connection (usually the host)
+    const hostConn = conns[0];
+    hostConn.write(JSON.stringify({
+      type: 'model_request',
+      timestamp: Date.now()
+    }));
+    
+    return true;
+  }
+  return false;
 }
