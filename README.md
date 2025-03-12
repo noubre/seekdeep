@@ -103,7 +103,7 @@ When using SeekDeep in a peer-to-peer setup:
 
 This ensures that all peers have access to the same models available on the host machine, regardless of what models they have installed locally.
 
-## Collaboration Modes
+### Collaboration Modes
 
 SeekDeep offers two collaboration modes when interacting with peers:
 
@@ -410,3 +410,47 @@ Below are examples of the actual JSON message structures used in the P2P communi
     "timestamp": 1647382941253
   }
 }
+=======
+### Mode-Specific Behavior
+
+#### Collaborative Mode
+- All peer queries and responses are broadcast to all connected peers
+- Each peer sees all conversations with the LLM
+- Messages include peer identification for UI attribution
+
+#### Private Mode
+- Queries and responses are only exchanged between the requesting peer and host
+- The `isPrivate` flag is set to `true` in responses
+- Peers only see their own interactions with the LLM
+
+### Error Handling
+
+The protocol implements several error-handling mechanisms:
+
+- **Connection Errors**: Connections are re-established automatically when disrupted
+- **Query Errors**: Error responses include descriptive messages for debugging
+- **Timeouts**: Queries without responses are eventually abandoned
+- **Deduplication**: Multiple identical messages are filtered out
+
+### Protocol Extensions
+
+The protocol is designed to be extensible for future features:
+
+- **Streaming Responses**: Chunked delivery with the `isComplete` flag
+- **Message Filtering**: Support for content moderation and filtering
+- **Capability Discovery**: Mechanism for peers to announce supported models
+
+## Key Features Explained
+
+### Markdown Rendering
+The application uses the marked.js library to parse and render Markdown in LLM responses. This provides:
+- Formatted text with headers, bold, italic, etc.
+- Code blocks with proper formatting
+- Lists, tables, and other structured content
+- Links and images
+
+### Peer Identification
+Each user in the system is identified as:
+- The current user sees themselves as "You"
+- Other peers are labeled as "Peer1", "Peer2", etc.
+- Each peer is assigned a unique color for easy visual identification
