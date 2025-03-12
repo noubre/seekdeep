@@ -379,14 +379,17 @@ async function handleClientQuery(conn, message) {
       const chunk = decoder.decode(value, { stream: true });
       buffer += chunk;
       
-      // Send the raw JSON to the client (client will parse it)
+      // Process the buffer to extract text from the JSON responses
+      const processedResponse = parseOllamaResponse(buffer);
+      
+      // Send the processed text (not raw JSON) to the client
       try {
         conn.write(JSON.stringify({
           type: 'response',
           requestId,
-          data: buffer,
+          data: processedResponse,
           isComplete: false,
-          isJson: true
+          isJson: false
         }));
         
         // Clear buffer after sending
@@ -402,12 +405,13 @@ async function handleClientQuery(conn, message) {
     
     // Send completion message
     if (buffer.trim()) {
+      const finalProcessedResponse = parseOllamaResponse(buffer);
       conn.write(JSON.stringify({
         type: 'response',
         requestId,
-        data: buffer,
+        data: finalProcessedResponse,
         isComplete: false,
-        isJson: true
+        isJson: false
       }));
     }
     
@@ -416,7 +420,7 @@ async function handleClientQuery(conn, message) {
       requestId,
       data: '',
       isComplete: true,
-      isJson: true
+      isJson: false
     }));
     
   } catch (error) {
