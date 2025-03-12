@@ -15,6 +15,16 @@ A P2P-enabled desktop application that interfaces with a local LLM (Ollama) usin
 - Keyboard shortcuts for improved productivity (Ctrl/Cmd + Enter to submit) (Not tested)
 - Supports multiple concurrent peers in both collaborative and individual modes
 
+
+
+![SeekDeep Screenshot](./screenshots/desktop.jpeg "SeekDeep Chat Interface")
+
+
+
+![SeekDeep Screenshot](./screenshots/server.jpeg "SeekDeep Server")
+
+
+
 ## Prerequisites
 
 Before running SeekDeep, make sure you have:
