@@ -155,25 +155,32 @@ function proxyToOllama(req, res) {
   }
 }
 
-// Function to fetch available models from Ollama
+// Helper function to get available models from Ollama
 async function getAvailableModels() {
   try {
-    console.log('Fetching available models from Ollama');
-    const response = await fetch('http://localhost:11434/api/tags');
+    console.log('Fetching available models from Ollama API');
+    const url = `${OLLAMA_API_URL}/api/tags`;
     
+    // Use Node.js fetch API
+    const fetchFn = typeof fetch === 'function' ? fetch : null;
+    if (!fetchFn) {
+      throw new Error('Fetch API not available');
+    }
+    
+    const response = await fetchFn(url);
     if (!response.ok) {
-      throw new Error(`Ollama API returned ${response.status}: ${response.statusText}`);
+      throw new Error(`Ollama API returned status ${response.status}`);
     }
     
     const data = await response.json();
-    console.log('Ollama returned data:', data);
+    console.log(`Found ${data.models ? data.models.length : 0} models from Ollama`);
     
-    if (data && data.models) {
-      return data.models;
-    } else {
-      console.warn('Ollama API returned unexpected format:', data);
-      return [];
-    }
+    // Format models to match the client's expected format
+    return data.models.map(model => ({
+      name: model.name,
+      id: model.name,
+      modified_at: model.modified_at
+    }));
   } catch (error) {
     console.error('Error fetching models from Ollama:', error);
     return [];
@@ -262,6 +269,7 @@ function startP2PServer() {
           switch (message.type) {
             case 'handshake':
               // Respond to handshake
+              console.log('Processing handshake from client:', b4a.toString(conn.remotePublicKey, 'hex').slice(0, 8) + '...');
               conn.write(JSON.stringify({
                 type: 'handshake_ack',
                 serverId: b4a.toString(publicKey, 'hex'),
@@ -274,8 +282,14 @@ function startP2PServer() {
               handleClientQuery(conn, message);
               break;
               
+            case 'model_request':
+              // Handle model list request from client
+              console.log('Client requested models list:', b4a.toString(conn.remotePublicKey, 'hex').slice(0, 8) + '...');
+              handleModelRequest(conn);
+              break;
+              
             default:
-              console.warn('Unknown message type:', message.type);
+              console.warn('Unknown message type:', message.type, 'Full message:', JSON.stringify(message));
           }
         } catch (err) {
           console.error('Error processing message:', err);
@@ -320,7 +334,10 @@ async function handleClientQuery(conn, message) {
     console.log(`Using model: ${model}`);
     
     // Using native Node.js fetch API
-    const fetchFn = typeof fetch === 'function' ? fetch : null;
+    const fetchFn = typeof fetch === 'function' ? fetch : 
+                   (typeof global !== 'undefined' && global.fetch) ? global.fetch : 
+                   null;
+    
     if (!fetchFn) {
       throw new Error('Fetch API not available');
     }
@@ -404,6 +421,34 @@ async function handleClientQuery(conn, message) {
     } catch (sendErr) {
       console.error('Failed to send error response:', sendErr);
     }
+  }
+}
+
+// Handle model list request from client
+function handleModelRequest(conn) {
+  try {
+    // Fetch available models from Ollama
+    getAvailableModels()
+      .then(models => {
+        console.log('Sending model list to client:', models.length, 'models');
+        conn.write(JSON.stringify({
+          type: 'models_update',
+          models
+        }));
+      })
+      .catch(error => {
+        console.error('Error fetching models for client:', error);
+        conn.write(JSON.stringify({
+          type: 'error',
+          error: 'Failed to fetch models'
+        }));
+      });
+  } catch (error) {
+    console.error('Error handling model request:', error);
+    conn.write(JSON.stringify({
+      type: 'error',
+      error: error.message
+    }));
   }
 }
 
