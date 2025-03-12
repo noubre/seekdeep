@@ -288,6 +288,18 @@ function startP2PServer() {
               handleModelRequest(conn);
               break;
               
+            case 'peer_message':
+              // Handle forwarding of peer messages (chat messages between peers)
+              console.log('Forwarding peer message:', b4a.toString(conn.remotePublicKey, 'hex').slice(0, 8) + '...', message.messageType);
+              handlePeerMessage(conn, message);
+              break;
+              
+            case 'response':
+              // Handle forwarding response from one peer to others
+              console.log('Forwarding response from:', b4a.toString(conn.remotePublicKey, 'hex').slice(0, 8) + '...');
+              handlePeerMessage(conn, message); // Reuse the same broadcast mechanism
+              break;
+              
             default:
               console.warn('Unknown message type:', message.type, 'Full message:', JSON.stringify(message));
           }
@@ -449,6 +461,29 @@ function handleModelRequest(conn) {
       type: 'error',
       error: error.message
     }));
+  }
+}
+
+// Handle peer message
+function handlePeerMessage(conn, message) {
+  try {
+    const senderKey = b4a.toString(conn.remotePublicKey, 'hex');
+    console.log(`Handling peer message from ${senderKey.slice(0, 8)}... (${message.messageType})`);
+    
+    // Broadcast the message to all other connections
+    for (const connection of swarm.connections) {
+      // Skip the sender
+      const connectionKey = b4a.toString(connection.remotePublicKey, 'hex');
+      if (connectionKey === senderKey) {
+        continue;
+      }
+      
+      // Forward the message
+      console.log(`Forwarding message to ${connectionKey.slice(0, 8)}...`);
+      connection.write(JSON.stringify(message));
+    }
+  } catch (error) {
+    console.error('Error handling peer message:', error);
   }
 }
 
