@@ -56,6 +56,8 @@ The server component makes your local Ollama instance accessible over P2P:
 
 3. Note the public key displayed in the terminal – this is your server's unique identifier on the P2P network.
 
+> **Note**: The server app is optional and only needed when you want to connect to a remote machine where you can't run the desktop app directly. The desktop app can act as both a client and server/host without requiring the separate server component.
+
 ### Running the Desktop App
 
 1. Make sure Ollama is running with the DeepSeek model.
@@ -73,6 +75,17 @@ The server component makes your local Ollama instance accessible over P2P:
 3. The app window will open, and you can start entering prompts in the text area and clicking "Seek" (or pressing Ctrl+Enter) to get responses.
 
 4. The app will automatically discover and connect to peers on the P2P network using Hyperswarm.
+
+### Desktop App as Host/Server
+
+The desktop app has built-in server capabilities, which means:
+
+1. You can run the desktop app as either a host or a peer
+2. When running as a host, other peers can connect to your instance directly
+3. No separate server component is required for most use cases
+4. The standalone server is primarily useful for headless environments or remote machines
+
+When you start the app, it automatically runs in host mode until you join an existing chat.
 
 ### Model Selection
 
