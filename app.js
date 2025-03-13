@@ -1020,9 +1020,18 @@ function setupPeerMessageHandler(conn, peerId) {
         
       case 'mode_update':
         // Received update about the host's collaborative/private mode
-        console.log(`Host chat mode is set to: ${message.isCollaborativeMode ? 'Collaborative' : 'Private'}`);
-        // If we're a joiner, update our local mode setting to match the host
-        if (!isSessionHost) {
+        console.log(`Received mode update from peer ${peerId.slice(0, 8)}... Mode: ${message.isCollaborativeMode ? 'Collaborative' : 'Private'}`);
+        
+        // Check if this peer is the host or server before applying the mode update
+        const peerInfo = activePeers.get(peerId);
+        const isPeerHost = peerInfo && (peerInfo.isServer || 
+                          // For our implementation, the first peer we connect to is considered the host
+                          (conns.length > 0 && conns[0] && 
+                           b4a.toString(conns[0].remotePublicKey, 'hex') === peerId));
+        
+        // If we're a joiner, ONLY update our local mode setting if the message comes from the host or server
+        if (!isSessionHost && isPeerHost) {
+          console.log(`Accepting mode update from host/server: ${message.isCollaborativeMode ? 'Collaborative' : 'Private'}`);
           isCollaborativeMode = message.isCollaborativeMode;
           // Update the UI to reflect the host's setting
           chatModeSelect.value = isCollaborativeMode ? 'collaborative' : 'private';
@@ -1033,6 +1042,9 @@ function setupPeerMessageHandler(conn, peerId) {
             type: 'system',
             content: `Chat mode set to ${isCollaborativeMode ? 'Collaborative (shared chat)' : 'Private (separate chats)'}.`
           });
+        } else if (!isSessionHost) {
+          // Log that we're ignoring a mode update from a non-host peer
+          console.log(`Ignoring mode update from non-host peer: ${peerId.slice(0, 8)}...`);
         }
         break;
         
