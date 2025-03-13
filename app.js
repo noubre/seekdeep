@@ -149,8 +149,8 @@ function removeThinkingContent(text) {
     if (!thinkContent.trim()) {
       return '';
     }
-    // Otherwise format it with the thinking marker
-    return `**[Thinking]** _${thinkContent}_`;
+    // Format thinking content with special styling for rendering in the UI
+    return `<div class="thinking-content"><span class="thinking-label">Thinking:</span>${thinkContent}</div>`;
   });
 }
 
@@ -600,7 +600,7 @@ function createMessageElement(message) {
       assistantBody.classList.add('message-body');
       
       // Render Markdown if content seems to contain it
-      if (containsMarkdown(messageContent)) {
+      if (containsMarkdown(messageContent) || messageContent.includes('<div class="thinking-content">')) {
         assistantBody.innerHTML = renderMarkdown(messageContent);
       } else {
         assistantBody.innerHTML = messageContent.replace(/\n/g, '<br>');
@@ -773,13 +773,13 @@ async function ask(model, prompt) {
       // Remove the thinking message
       chatHistory.pop();
       
-      // Start with empty assistant message that we'll stream into
-      const assistantMessage = {
-        type: 'assistant',
-        content: '',
+      // Create a temporary thinking message to show progress
+      const thinkingMessage = {
+        type: 'thinking',
+        content: 'Generating response...',
         requestId: requestId
       };
-      addToChatHistory(assistantMessage);
+      addToChatHistory(thinkingMessage);
       
       while (true) {
         const { done, value } = await reader.read();
@@ -799,9 +799,8 @@ async function ask(model, prompt) {
           // Add the response chunk to our full response text
           responseText += responseChunk;
           
-          // Always update the assistant message with the full response text
-          // The removeThinkingContent function will handle the formatting of thinking tags
-          assistantMessage.content = removeThinkingContent(responseText);
+          // Update the thinking message to show progress
+          thinkingMessage.content = `Generating response... (${Math.round(responseText.length / 10)} tokens)`;
           updateChatDisplay();
           
           // Broadcast our own responses to connected peers in collaborative mode
@@ -814,7 +813,9 @@ async function ask(model, prompt) {
           const fallbackResponse = parseOllamaResponse(chunk);
           if (fallbackResponse) {
             responseText += fallbackResponse;
-            assistantMessage.content = removeThinkingContent(responseText);
+            
+            // Update the thinking message to show progress
+            thinkingMessage.content = `Generating response... (${Math.round(responseText.length / 10)} tokens)`;
             updateChatDisplay();
             
             if (isCollaborativeMode) {
@@ -824,9 +825,23 @@ async function ask(model, prompt) {
         }
       }
       
-      // Mark the assistant message as complete
-      assistantMessage.isComplete = true;
+      // Remove the thinking message
+      chatHistory.pop();
+      
+      // Now create the final assistant message with the complete response
+      const assistantMessage = {
+        type: 'assistant',
+        content: responseText,
+        requestId: requestId,
+        isComplete: true
+      };
+      addToChatHistory(assistantMessage);
       updateChatDisplay();
+      
+      // Send the isComplete signal to peers
+      if (isCollaborativeMode) {
+        streamToPeers("", requestId, true);
+      }
       
       // Store this requestId as our activeRequestId
       activeRequestId = requestId;
@@ -1118,19 +1133,11 @@ function setupPeerMessageHandler(conn, peerId) {
             console.log("Adding response to chat history");
             // Add to existing assistant message or create new one
             const lastMessage = chatHistory[chatHistory.length - 1];
-            if (lastMessage && lastMessage.type === 'assistant' && !message.isComplete) {
+            if (lastMessage && lastMessage.type === 'assistant') {
               // Update existing message instead of creating a new one
               lastMessage.content += responseContent;
-            } else if (lastMessage && lastMessage.type === 'thinking') {
-              // Replace thinking message with assistant message
-              chatHistory.pop();
-              addToChatHistory({
-                type: 'assistant',
-                content: responseContent,
-                requestId: message.requestId
-              });
-            } else if (!lastMessage || lastMessage.type !== 'assistant') {
-              // Create new assistant message
+            } else {
+              // Create a new assistant message
               addToChatHistory({
                 type: 'assistant',
                 content: responseContent,
@@ -1147,15 +1154,13 @@ function setupPeerMessageHandler(conn, peerId) {
           }
           
           // If this is the last message, clean up request tracking
-          if (message.isComplete) {
-            if (message.requestId) {
-              console.log(`Removing requestId ${message.requestId} from active requests`);
-              activeRequests.delete(message.requestId);
-            }
-            if (message.requestId === activeRequestId) {
-              console.log(`Clearing activeRequestId: ${activeRequestId}`);
-              activeRequestId = null;
-            }
+          if (message.requestId) {
+            console.log(`Removing requestId ${message.requestId} from active requests`);
+            activeRequests.delete(message.requestId);
+          }
+          if (message.requestId === activeRequestId) {
+            console.log(`Clearing activeRequestId: ${activeRequestId}`);
+            activeRequestId = null;
           }
         } else {
           console.log("Ignoring response from untracked request. Current active:", activeRequestId, "Got:", message.requestId);
@@ -1211,10 +1216,10 @@ function setupPeerMessageHandler(conn, peerId) {
                 const newAssistantMessage = {
                   type: 'assistant',
                   content: removeThinkingContent(message.content),
+                  rawContent: message.content, // Store the raw content with thinking tags
                   timestamp: Date.now(),
                   fromPeer: message.fromPeer,
-                  requestId: currentRequestId,
-                  isComplete: message.isComplete || false
+                  requestId: currentRequestId
                 };
                 
                 // Add to chat history
@@ -1236,11 +1241,6 @@ function setupPeerMessageHandler(conn, peerId) {
                 // Update the displayed content with thinking tags properly formatted
                 matchingLastMessage.content = removeThinkingContent(matchingLastMessage.rawContent);
                 
-                // Mark as complete if needed
-                if (message.isComplete) {
-                  matchingLastMessage.isComplete = true;
-                }
-                
                 // Update display
                 updateChatDisplay();
               } else {
@@ -1253,8 +1253,7 @@ function setupPeerMessageHandler(conn, peerId) {
                   rawContent: message.content,
                   timestamp: Date.now(),
                   fromPeer: message.fromPeer,
-                  requestId: currentRequestId,
-                  isComplete: message.isComplete || false
+                  requestId: currentRequestId
                 };
                 
                 chatHistory.push(newAssistantMessage);
@@ -1458,7 +1457,7 @@ function streamToPeers(content, requestId, isComplete = false, fromPeer = 'Host'
         type: 'peer_message',
         messageType: 'assistant',
         content: content,
-        rawContent: content, // Store the original content with think tags
+        rawContent: content, // Send the original content with thinking tags intact
         fromPeer: fromPeer,
         requestId: requestId,
         isComplete: isComplete,
@@ -1567,13 +1566,13 @@ form.addEventListener('submit', async (event) => {
       // Remove the thinking message
       chatHistory.pop();
       
-      // Start with empty assistant message that we'll stream into
-      const assistantMessage = {
-        type: 'assistant',
-        content: '',
+      // Create a temporary thinking message to show progress
+      const thinkingMessage = {
+        type: 'thinking',
+        content: 'Generating response...',
         requestId: requestId
       };
-      addToChatHistory(assistantMessage);
+      addToChatHistory(thinkingMessage);
       
       while (true) {
         const { done, value } = await reader.read();
@@ -1593,9 +1592,8 @@ form.addEventListener('submit', async (event) => {
           // Add the response chunk to our full response text
           responseText += responseChunk;
           
-          // Always update the assistant message with the full response text
-          // The removeThinkingContent function will handle the formatting of thinking tags
-          assistantMessage.content = removeThinkingContent(responseText);
+          // Update the thinking message to show progress
+          thinkingMessage.content = `Generating response... (${Math.round(responseText.length / 10)} tokens)`;
           updateChatDisplay();
           
           // Broadcast our own responses to connected peers in collaborative mode
@@ -1608,7 +1606,9 @@ form.addEventListener('submit', async (event) => {
           const fallbackResponse = parseOllamaResponse(chunk);
           if (fallbackResponse) {
             responseText += fallbackResponse;
-            assistantMessage.content = removeThinkingContent(responseText);
+            
+            // Update the thinking message to show progress
+            thinkingMessage.content = `Generating response... (${Math.round(responseText.length / 10)} tokens)`;
             updateChatDisplay();
             
             if (isCollaborativeMode) {
@@ -1618,9 +1618,23 @@ form.addEventListener('submit', async (event) => {
         }
       }
       
-      // Mark the assistant message as complete
-      assistantMessage.isComplete = true;
+      // Remove the thinking message
+      chatHistory.pop();
+      
+      // Now create the final assistant message with the complete response
+      const assistantMessage = {
+        type: 'assistant',
+        content: responseText,
+        requestId: requestId,
+        isComplete: true
+      };
+      addToChatHistory(assistantMessage);
       updateChatDisplay();
+      
+      // Send the isComplete signal to peers
+      if (isCollaborativeMode) {
+        streamToPeers("", requestId, true);
+      }
       
       // Store this requestId as our activeRequestId
       activeRequestId = requestId;

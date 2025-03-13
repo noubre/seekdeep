@@ -155,184 +155,6 @@ function proxyToOllama(req, res) {
   }
 }
 
-// Helper function to get available models from Ollama
-async function getAvailableModels() {
-  try {
-    console.log('Fetching available models from Ollama API');
-    const url = `${OLLAMA_API_URL}/api/tags`;
-    
-    // Use Node.js fetch API
-    const fetchFn = typeof fetch === 'function' ? fetch : null;
-    if (!fetchFn) {
-      throw new Error('Fetch API not available');
-    }
-    
-    const response = await fetchFn(url);
-    if (!response.ok) {
-      throw new Error(`Ollama API returned status ${response.status}`);
-    }
-    
-    const data = await response.json();
-    console.log(`Found ${data.models ? data.models.length : 0} models from Ollama`);
-    
-    // Format models to match the client's expected format
-    return data.models.map(model => ({
-      name: model.name,
-      id: model.name,
-      modified_at: model.modified_at
-    }));
-  } catch (error) {
-    console.error('Error fetching models from Ollama:', error);
-    return [];
-  }
-}
-
-// Parse Ollama response chunk
-function parseOllamaResponse(text) {
-  try {
-    // Try to parse as JSON
-    const lines = text.split('\n').filter(line => line.trim());
-    
-    let responseText = '';
-    
-    for (const line of lines) {
-      try {
-        const json = JSON.parse(line);
-        
-        // Skip thinking tags and extract only the response
-        if (json.response && 
-            !json.response.includes('<think>') && 
-            !json.response.includes('</think>')) {
-          responseText += json.response;
-        }
-        
-        // Handle completion
-        if (json.done) {
-          console.log('LLM response complete:', json.done_reason || 'unknown reason');
-        }
-      } catch (parseErr) {
-        console.warn('Failed to parse JSON line:', line, parseErr);
-        // If it's not valid JSON, just include the raw text
-        responseText += line;
-      }
-    }
-    
-    return responseText;
-  } catch (err) {
-    console.error('Error parsing Ollama response:', err);
-    return text; // Return original text on error
-  }
-}
-
-// Start the server, 5000 is usually already taken
-const PORT = 3000;
-server.listen(PORT, () => {
-  console.log(`Server running at http://localhost:${PORT}`);
-  console.log(`Server public key: ${b4a.toString(keyPair.publicKey, 'hex')}`);
-  console.log('Sharing this public key will allow others to connect to this server via the P2P network');
-});
-
-// Log when server is closed
-server.on('close', () => {
-  console.log('Server closed');
-  swarm.destroy();
-});
-
-// Initialize Hyperswarm
-const swarm = new Hyperswarm();
-// Generate or use a fixed key pair for consistency
-const keyPair = crypto.keyPair();
-const publicKey = keyPair.publicKey;
-const topic = publicKey; // Use our public key as the discovery topic
-
-// Cache for pending requests
-const pendingRequests = new Map();
-
-// Start the P2P server
-function startP2PServer() {
-  try {
-    console.log('P2P Server public key:', b4a.toString(publicKey, 'hex'));
-    
-    // Join the swarm with our public key as the topic
-    swarm.join(topic, { server: true });
-    console.log('Joined Hyperswarm for P2P discovery');
-    
-    // Handle new connections
-    swarm.on('connection', (conn) => {
-      console.log('New peer connected:', b4a.toString(conn.remotePublicKey, 'hex').slice(0, 8) + '...');
-      
-      conn.on('data', async (data) => {
-        try {
-          const message = JSON.parse(data.toString());
-          console.log('Received message:', message.type);
-          
-          switch (message.type) {
-            case 'handshake':
-              // Respond to handshake
-              console.log('Processing handshake from client:', b4a.toString(conn.remotePublicKey, 'hex').slice(0, 8) + '...');
-              conn.write(JSON.stringify({
-                type: 'handshake_ack',
-                serverId: b4a.toString(publicKey, 'hex'),
-                timestamp: Date.now()
-              }));
-              break;
-              
-            case 'query':
-              // Handle LLM query from a client
-              handleClientQuery(conn, message);
-              break;
-              
-            case 'model_request':
-              // Handle model list request from client
-              console.log('Client requested models list:', b4a.toString(conn.remotePublicKey, 'hex').slice(0, 8) + '...');
-              handleModelRequest(conn);
-              break;
-              
-            case 'peer_message':
-              // Handle forwarding of peer messages (chat messages between peers)
-              console.log('Forwarding peer message:', b4a.toString(conn.remotePublicKey, 'hex').slice(0, 8) + '...', message.messageType);
-              handlePeerMessage(conn, message);
-              break;
-              
-            case 'response':
-              // Handle forwarding response from one peer to others
-              console.log('Forwarding response from:', b4a.toString(conn.remotePublicKey, 'hex').slice(0, 8) + '...');
-              handlePeerMessage(conn, message); // Reuse the same broadcast mechanism
-              break;
-              
-            default:
-              console.warn('Unknown message type:', message.type, 'Full message:', JSON.stringify(message));
-          }
-        } catch (err) {
-          console.error('Error processing message:', err);
-          try {
-            // Try to send an error response
-            conn.write(JSON.stringify({
-              type: 'error',
-              error: err.message
-            }));
-          } catch (sendErr) {
-            console.error('Failed to send error message:', sendErr);
-          }
-        }
-      });
-      
-      conn.on('close', () => {
-        console.log('Peer disconnected:', b4a.toString(conn.remotePublicKey, 'hex').slice(0, 8) + '...');
-      });
-      
-      conn.on('error', (err) => {
-        console.error('Connection error:', err);
-      });
-    });
-    
-    return b4a.toString(publicKey, 'hex');
-  } catch (error) {
-    console.error('Failed to start P2P server:', error);
-    throw error;
-  }
-}
-
 // Handle a query from a client
 async function handleClientQuery(conn, message) {
   const { requestId, model, prompt } = message;
@@ -367,10 +189,11 @@ async function handleClientQuery(conn, message) {
       throw new Error(`Ollama API returned status ${response.status}`);
     }
     
-    // Stream the response back to the client
+    // Stream the response from Ollama, but accumulate for a single response to the client
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+    let completeResponse = '';
     
     while (true) {
       const { done, value } = await reader.read();
@@ -380,48 +203,69 @@ async function handleClientQuery(conn, message) {
       buffer += chunk;
       
       // Process the buffer to extract text from the JSON responses
-      const processedResponse = parseOllamaResponse(buffer);
+      const lines = buffer.split('\n').filter(line => line.trim());
+      let newResponseText = '';
+      let leftoverBuffer = '';
       
-      // Send the processed text (not raw JSON) to the client
-      try {
-        conn.write(JSON.stringify({
-          type: 'response',
-          requestId,
-          data: processedResponse,
-          isComplete: false,
-          isJson: false
-        }));
-        
-        // Clear buffer after sending
-        buffer = '';
-      } catch (err) {
-        console.error('Error sending response chunk:', err);
-        break;
+      // Process each line
+      for (const line of lines) {
+        try {
+          const json = JSON.parse(line);
+          if (json.response) {
+            newResponseText += json.response;
+          }
+        } catch (parseErr) {
+          // Keep non-parseable lines in the buffer
+          leftoverBuffer += line + '\n';
+        }
       }
       
-      // Small delay to avoid overwhelming the connection
-      await new Promise(resolve => setTimeout(resolve, 50));
+      // Update buffer with leftover content
+      buffer = leftoverBuffer;
+      
+      // Add new text to the complete response
+      completeResponse += newResponseText;
+      
+      // Provide progress indication to the client (optional)
+      if (newResponseText) {
+        conn.write(JSON.stringify({
+          type: 'progress',
+          requestId,
+          percentComplete: Math.floor(Math.random() * 100), // Just a placeholder
+          isComplete: false
+        }));
+      }
     }
     
-    // Send completion message
+    // Process any remaining buffer content
     if (buffer.trim()) {
-      const finalProcessedResponse = parseOllamaResponse(buffer);
-      conn.write(JSON.stringify({
-        type: 'response',
-        requestId,
-        data: finalProcessedResponse,
-        isComplete: false,
-        isJson: false
-      }));
+      const lines = buffer.split('\n').filter(line => line.trim());
+      
+      for (const line of lines) {
+        try {
+          const json = JSON.parse(line);
+          if (json.response) {
+            completeResponse += json.response;
+          }
+        } catch (parseErr) {
+          // Ignore invalid JSON
+        }
+      }
     }
     
+    // Format the complete response with thinking content
+    const formattedResponse = formatThinkingContent(completeResponse);
+    
+    // Send the single complete formatted response
     conn.write(JSON.stringify({
       type: 'response',
       requestId,
-      data: '',
+      data: formattedResponse,
       isComplete: true,
       isJson: false
     }));
+    
+    console.log(`Sent complete response for request ${requestId}`);
     
   } catch (error) {
     console.error('Error handling client query:', error);
@@ -560,6 +404,115 @@ function startOllama() {
   }
 }
 
+// Start the server, 5000 is usually already taken
+const PORT = 3000;
+server.listen(PORT, () => {
+  console.log(`Server running at http://localhost:${PORT}`);
+  console.log(`Server public key: ${b4a.toString(keyPair.publicKey, 'hex')}`);
+  console.log('Sharing this public key will allow others to connect to this server via the P2P network');
+});
+
+// Log when server is closed
+server.on('close', () => {
+  console.log('Server closed');
+  swarm.destroy();
+});
+
+// Initialize Hyperswarm
+const swarm = new Hyperswarm();
+// Generate or use a fixed key pair for consistency
+const keyPair = crypto.keyPair();
+const publicKey = keyPair.publicKey;
+const topic = publicKey; // Use our public key as the discovery topic
+
+// Cache for pending requests
+const pendingRequests = new Map();
+
+// Start the P2P server
+function startP2PServer() {
+  try {
+    console.log('P2P Server public key:', b4a.toString(publicKey, 'hex'));
+    
+    // Join the swarm with our public key as the topic
+    swarm.join(topic, { server: true });
+    console.log('Joined Hyperswarm for P2P discovery');
+    
+    // Handle new connections
+    swarm.on('connection', (conn) => {
+      console.log('New peer connected:', b4a.toString(conn.remotePublicKey, 'hex').slice(0, 8) + '...');
+      
+      conn.on('data', async (data) => {
+        try {
+          const message = JSON.parse(data.toString());
+          console.log('Received message:', message.type);
+          
+          switch (message.type) {
+            case 'handshake':
+              // Respond to handshake
+              console.log('Processing handshake from client:', b4a.toString(conn.remotePublicKey, 'hex').slice(0, 8) + '...');
+              conn.write(JSON.stringify({
+                type: 'handshake_ack',
+                serverId: b4a.toString(publicKey, 'hex'),
+                timestamp: Date.now()
+              }));
+              break;
+              
+            case 'query':
+              // Handle LLM query from a client
+              handleClientQuery(conn, message);
+              break;
+              
+            case 'model_request':
+              // Handle model list request from client
+              console.log('Client requested models list:', b4a.toString(conn.remotePublicKey, 'hex').slice(0, 8) + '...');
+              handleModelRequest(conn);
+              break;
+              
+            case 'peer_message':
+              // Handle forwarding of peer messages (chat messages between peers)
+              console.log('Forwarding peer message:', b4a.toString(conn.remotePublicKey, 'hex').slice(0, 8) + '...', message.messageType);
+              handlePeerMessage(conn, message);
+              break;
+              
+            case 'response':
+              // Handle forwarding response from one peer to others
+              console.log('Forwarding response from:', b4a.toString(conn.remotePublicKey, 'hex').slice(0, 8) + '...');
+              handlePeerMessage(conn, message); // Reuse the same broadcast mechanism
+              break;
+              
+            default:
+              console.warn('Unknown message type:', message.type, 'Full message:', JSON.stringify(message));
+          }
+        } catch (err) {
+          console.error('Error processing message:', err);
+          try {
+            // Try to send an error response
+            conn.write(JSON.stringify({
+              type: 'error',
+              error: err.message
+            }));
+          } catch (sendErr) {
+            console.error('Failed to send error message:', sendErr);
+          }
+        }
+      });
+      
+      conn.on('close', () => {
+        console.log('Peer disconnected:', b4a.toString(conn.remotePublicKey, 'hex').slice(0, 8) + '...');
+      });
+      
+      conn.on('error', (err) => {
+        console.error('Connection error:', err);
+      });
+    });
+    
+    return b4a.toString(publicKey, 'hex');
+  } catch (error) {
+    console.error('Failed to start P2P server:', error);
+    throw error;
+  }
+}
+
 // Check if Ollama is running
 checkOllama();
 
@@ -575,3 +528,61 @@ getAvailableModels()
 
 console.log('HTTP server is running on http://localhost:3000');
 console.log('Press Ctrl+C to stop the server'); 
+
+// Helper function to get available models from Ollama
+async function getAvailableModels() {
+  try {
+    console.log('Fetching available models from Ollama API');
+    const url = `${OLLAMA_API_URL}/api/tags`;
+    
+    // Use Node.js fetch API
+    const fetchFn = typeof fetch === 'function' ? fetch : 
+                   (typeof global !== 'undefined' && global.fetch) ? global.fetch : 
+                   null;
+    
+    if (!fetchFn) {
+      throw new Error('Fetch API not available');
+    }
+    
+    const response = await fetchFn(url);
+    if (!response.ok) {
+      throw new Error(`Ollama API returned status ${response.status}`);
+    }
+    
+    const data = await response.json();
+    console.log(`Found ${data.models ? data.models.length : 0} models from Ollama`);
+    
+    // Format models to match the client's expected format
+    return data.models.map(model => ({
+      name: model.name,
+      id: model.name,
+      modified_at: model.modified_at
+    }));
+  } catch (error) {
+    console.error('Error fetching models from Ollama:', error);
+    return [];
+  }
+}
+
+// Format thinking content with HTML for client-side rendering
+function formatThinkingContent(text) {
+  // Handle non-string input
+  if (typeof text !== 'string') {
+    return text;
+  }
+  
+  // Check if there are any thinking tags
+  if (!text.includes('<think>') || !text.includes('</think>')) {
+    return text;
+  }
+  
+  // Process thinking tags with a regular expression
+  return text.replace(/<think>([\s\S]*?)<\/think>/g, (match, thinkContent) => {
+    // If thinking content only contains whitespace/newlines, remove it completely
+    if (!thinkContent.trim()) {
+      return '';
+    }
+    // Format thinking content with special styling for rendering in the UI
+    return `<div class="thinking-content"><span class="thinking-label">Thinking:</span>${thinkContent}</div>`;
+  });
+}
