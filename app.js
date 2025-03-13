@@ -130,37 +130,28 @@ function parseOllamaResponse(text) {
   }
 }
 
-// Remove content enclosed in <think></think> tags
+// Preserve content inside <think> tags, but clearly mark it as thinking content
+// Skip empty thinking sections that only contain newlines
 function removeThinkingContent(text) {
   // Handle non-string input
   if (typeof text !== 'string') {
     return text;
   }
   
-  // Check if we have any think tags
-  if (!text.includes('<think>') && !text.includes('</think>')) {
+  // Check if there are any thinking tags
+  if (!text.includes('<think>') || !text.includes('</think>')) {
     return text;
   }
   
-  // Initial result
-  let result = '';
-  let insideThinkTag = false;
-  
-  // Split by opening and closing think tags
-  const segments = text.split(/(<think>|<\/think>)/g);
-  
-  for (const segment of segments) {
-    if (segment === '<think>') {
-      insideThinkTag = true;
-    } else if (segment === '</think>') {
-      insideThinkTag = false;
-    } else if (!insideThinkTag) {
-      // Only add segments that are not inside think tags
-      result += segment;
+  // Process thinking tags with a regular expression
+  return text.replace(/<think>([\s\S]*?)<\/think>/g, (match, thinkContent) => {
+    // If thinking content only contains whitespace/newlines, remove it completely
+    if (!thinkContent.trim()) {
+      return '';
     }
-  }
-  
-  return result;
+    // Otherwise format it with the thinking marker
+    return `**[Thinking]** _${thinkContent}_`;
+  });
 }
 
 // Initialize Hyperswarm
@@ -726,12 +717,25 @@ async function ask(model, prompt) {
   const requestId = crypto.randomBytes(8).toString('hex');
   
   // Add user message to chat
-  addToChatHistory({
+  const userMessage = {
     type: 'user',
     content: prompt,
     requestId: requestId,
     fromPeer: isSessionHost ? 'Host' : 'You' // Explicitly mark host messages
-  });
+  };
+  
+  addToChatHistory(userMessage);
+  
+  // If host is submitting, broadcast the user message to peers
+  if (isSessionHost && isCollaborativeMode) {
+    broadcastToPeers({
+      type: 'peer_message',
+      messageType: 'user',
+      content: prompt,
+      fromPeer: 'Host',
+      requestId: requestId
+    });
+  }
   
   // Add thinking message
   addToChatHistory({
@@ -765,7 +769,6 @@ async function ask(model, prompt) {
       const reader = response.body.getReader();
       let decoder = new TextDecoder();
       let responseText = '';
-      let isThinking = false;
       
       // Remove the thinking message
       chatHistory.pop();
@@ -793,57 +796,25 @@ async function ask(model, prompt) {
           const responseChunk = json.response || '';
           console.log("Extracted response chunk:", responseChunk);
           
-          // Handle think tags for this chunk
-          if (responseChunk.includes('<think>')) {
-            isThinking = true;
-            // Extract only the content before the think tag
-            const beforeThink = responseChunk.split('<think>')[0];
-            if (beforeThink && beforeThink.trim()) {
-              responseText += beforeThink;
-              assistantMessage.content = responseText;
-              updateChatDisplay();
-              
-              if (isCollaborativeMode) {
-                streamToPeers(beforeThink, requestId);
-              }
-            }
-          } else if (responseChunk.includes('</think>')) {
-            isThinking = false;
-            // Extract only the content after the closing think tag
-            const afterThink = responseChunk.split('</think>')[1];
-            if (afterThink && afterThink.trim()) {
-              responseText += afterThink;
-              assistantMessage.content = responseText;
-              updateChatDisplay();
-              
-              if (isCollaborativeMode) {
-                streamToPeers(afterThink, requestId);
-              }
-            }
-          } else if (!isThinking && responseChunk.trim()) {
-            // Only add non-thinking content to the response
-            responseText += responseChunk;
-            
-            // Update the assistant message with new content
-            assistantMessage.content = responseText;
-            // This ensures the message in chatHistory gets updated
-            updateChatDisplay();
-            
-            // Broadcast our own responses to connected peers in collaborative mode
-            if (isCollaborativeMode) {
-              streamToPeers(responseChunk, requestId);
-            }
-          } else if (isThinking) {
-            // Skip content inside thinking tags
-            console.log("Skipping thinking content:", responseChunk);
+          // Add the response chunk to our full response text
+          responseText += responseChunk;
+          
+          // Always update the assistant message with the full response text
+          // The removeThinkingContent function will handle the formatting of thinking tags
+          assistantMessage.content = removeThinkingContent(responseText);
+          updateChatDisplay();
+          
+          // Broadcast our own responses to connected peers in collaborative mode
+          if (isCollaborativeMode) {
+            streamToPeers(responseChunk, requestId);
           }
         } catch (parseError) {
           console.warn("Error parsing chunk as JSON:", parseError);
           // If not valid JSON, use the parseOllamaResponse as a fallback
           const fallbackResponse = parseOllamaResponse(chunk);
-          if (fallbackResponse && !isThinking) {
+          if (fallbackResponse) {
             responseText += fallbackResponse;
-            assistantMessage.content = responseText;
+            assistantMessage.content = removeThinkingContent(responseText);
             updateChatDisplay();
             
             if (isCollaborativeMode) {
@@ -943,6 +914,7 @@ function setupPeerMessageHandler(conn, peerId) {
           while (usedNumbers.has(peerNumber)) {
             peerNumber++;
           }
+          
           displayName = `Peer${peerNumber}`;
         }
         
@@ -1238,7 +1210,7 @@ function setupPeerMessageHandler(conn, peerId) {
                 // Create a new message in the chat history
                 const newAssistantMessage = {
                   type: 'assistant',
-                  content: message.content,
+                  content: removeThinkingContent(message.content),
                   timestamp: Date.now(),
                   fromPeer: message.fromPeer,
                   requestId: currentRequestId,
@@ -1253,8 +1225,16 @@ function setupPeerMessageHandler(conn, peerId) {
                 // We found an existing message to append to
                 console.log(`Appending to existing assistant message for requestId: ${currentRequestId}`);
                 
-                // Append to the existing message
-                matchingLastMessage.content += message.content;
+                // Get the current raw content and append the new content
+                if (!matchingLastMessage.rawContent) {
+                  matchingLastMessage.rawContent = matchingLastMessage.content;
+                }
+                
+                // Add the new content to the raw content
+                matchingLastMessage.rawContent += message.content;
+                
+                // Update the displayed content with thinking tags properly formatted
+                matchingLastMessage.content = removeThinkingContent(matchingLastMessage.rawContent);
                 
                 // Mark as complete if needed
                 if (message.isComplete) {
@@ -1269,7 +1249,8 @@ function setupPeerMessageHandler(conn, peerId) {
                 
                 const newAssistantMessage = {
                   type: 'assistant',
-                  content: message.content,
+                  content: removeThinkingContent(message.content),
+                  rawContent: message.content,
                   timestamp: Date.now(),
                   fromPeer: message.fromPeer,
                   requestId: currentRequestId,
@@ -1477,6 +1458,7 @@ function streamToPeers(content, requestId, isComplete = false, fromPeer = 'Host'
         type: 'peer_message',
         messageType: 'assistant',
         content: content,
+        rawContent: content, // Store the original content with think tags
         fromPeer: fromPeer,
         requestId: requestId,
         isComplete: isComplete,
@@ -1529,12 +1511,25 @@ form.addEventListener('submit', async (event) => {
   const requestId = crypto.randomBytes(8).toString('hex');
   
   // Add user message to chat
-  addToChatHistory({
+  const userMessage = {
     type: 'user',
     content: prompt,
     requestId: requestId,
     fromPeer: isSessionHost ? 'Host' : 'You' // Explicitly mark host messages
-  });
+  };
+  
+  addToChatHistory(userMessage);
+  
+  // If host is submitting, broadcast the user message to peers
+  if (isSessionHost && isCollaborativeMode) {
+    broadcastToPeers({
+      type: 'peer_message',
+      messageType: 'user',
+      content: prompt,
+      fromPeer: 'Host',
+      requestId: requestId
+    });
+  }
   
   // Add thinking message
   addToChatHistory({
@@ -1568,7 +1563,6 @@ form.addEventListener('submit', async (event) => {
       const reader = response.body.getReader();
       let decoder = new TextDecoder();
       let responseText = '';
-      let isThinking = false;
       
       // Remove the thinking message
       chatHistory.pop();
@@ -1596,57 +1590,25 @@ form.addEventListener('submit', async (event) => {
           const responseChunk = json.response || '';
           console.log("Extracted response chunk:", responseChunk);
           
-          // Handle think tags for this chunk
-          if (responseChunk.includes('<think>')) {
-            isThinking = true;
-            // Extract only the content before the think tag
-            const beforeThink = responseChunk.split('<think>')[0];
-            if (beforeThink && beforeThink.trim()) {
-              responseText += beforeThink;
-              assistantMessage.content = responseText;
-              updateChatDisplay();
-              
-              if (isCollaborativeMode) {
-                streamToPeers(beforeThink, requestId);
-              }
-            }
-          } else if (responseChunk.includes('</think>')) {
-            isThinking = false;
-            // Extract only the content after the closing think tag
-            const afterThink = responseChunk.split('</think>')[1];
-            if (afterThink && afterThink.trim()) {
-              responseText += afterThink;
-              assistantMessage.content = responseText;
-              updateChatDisplay();
-              
-              if (isCollaborativeMode) {
-                streamToPeers(afterThink, requestId);
-              }
-            }
-          } else if (!isThinking && responseChunk.trim()) {
-            // Only add non-thinking content to the response
-            responseText += responseChunk;
-            
-            // Update the assistant message with new content
-            assistantMessage.content = responseText;
-            // This ensures the message in chatHistory gets updated
-            updateChatDisplay();
-            
-            // Broadcast our own responses to connected peers in collaborative mode
-            if (isCollaborativeMode) {
-              streamToPeers(responseChunk, requestId);
-            }
-          } else if (isThinking) {
-            // Skip content inside thinking tags
-            console.log("Skipping thinking content:", responseChunk);
+          // Add the response chunk to our full response text
+          responseText += responseChunk;
+          
+          // Always update the assistant message with the full response text
+          // The removeThinkingContent function will handle the formatting of thinking tags
+          assistantMessage.content = removeThinkingContent(responseText);
+          updateChatDisplay();
+          
+          // Broadcast our own responses to connected peers in collaborative mode
+          if (isCollaborativeMode) {
+            streamToPeers(responseChunk, requestId);
           }
         } catch (parseError) {
           console.warn("Error parsing chunk as JSON:", parseError);
           // If not valid JSON, use the parseOllamaResponse as a fallback
           const fallbackResponse = parseOllamaResponse(chunk);
-          if (fallbackResponse && !isThinking) {
+          if (fallbackResponse) {
             responseText += fallbackResponse;
-            assistantMessage.content = responseText;
+            assistantMessage.content = removeThinkingContent(responseText);
             updateChatDisplay();
             
             if (isCollaborativeMode) {
