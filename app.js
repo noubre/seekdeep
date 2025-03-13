@@ -273,7 +273,7 @@ function initializeNewChat() {
   chatModeSelect.disabled = false;
   
   // Get the current mode from the UI
-  isCollaborativeMode = chatModeSelect.value === 'collaborative';
+  isCollaborativeMode = chatModeSelect.value === 'Private';
   
   // Log connection status
   console.log('Starting new chat session with topic:', topicHex);
@@ -318,7 +318,7 @@ function joinExistingChat(topicKeyHex) {
     
     // As a joiner, we'll get the mode from the host later
     // but we'll start with our preferred mode from the UI
-    isCollaborativeMode = chatModeSelect.value === 'collaborative';
+    isCollaborativeMode = chatModeSelect.value === 'Private';
     
     // Log connection status
     console.log('Joining existing chat session with topic:', topicHex);

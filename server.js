@@ -441,6 +441,12 @@ function startP2PServer() {
     swarm.on('connection', (conn) => {
       console.log('New peer connected:', b4a.toString(conn.remotePublicKey, 'hex').slice(0, 8) + '...');
       
+      // Send mode update message to the newly connected peer
+      conn.write(JSON.stringify({
+        type: 'mode_update',
+        isCollaborativeMode: false // Server is always in private mode
+      }));
+      
       conn.on('data', async (data) => {
         try {
           const message = JSON.parse(data.toString());
