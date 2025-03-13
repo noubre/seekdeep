@@ -503,7 +503,25 @@ function createMessageElement(message) {
   const messageEl = document.createElement('div');
   messageEl.classList.add('message');
   
-  let messageContent = message.content || '';
+  console.log("Creating message element for:", message);
+  
+  // We'll now process the content differently based on message type
+  let messageContent = '';
+  
+  if (message.type === 'assistant') {
+    // For assistant messages, always use the raw content if available
+    // This ensures thinking content is properly rendered
+    if (message.rawContent) {
+      // Process the raw content to properly format thinking tags
+      messageContent = removeThinkingContent(message.rawContent);
+    } else {
+      // If no raw content, fall back to regular content
+      messageContent = message.content || '';
+    }
+  } else {
+    // For non-assistant messages, just use the content
+    messageContent = message.content || '';
+  }
   
   switch (message.type) {
     case 'user': {
@@ -828,13 +846,22 @@ async function ask(model, prompt) {
       // Remove the thinking message
       chatHistory.pop();
       
-      // Now create the final assistant message with the complete response
+      console.log("Creating final message with content:", responseText);
+      console.log("Contains thinking tags:", responseText.includes("<think>"));
+      
       const assistantMessage = {
         type: 'assistant',
-        content: responseText,
+        content: removeThinkingContent(responseText), // Process thinking content just like peer messages
+        rawContent: responseText, // Store raw content with thinking tags
         requestId: requestId,
+        fromPeer: 'Host', // Explicitly mark as from host for attribution
         isComplete: true
       };
+      
+      // Log the processed content
+      console.log("Processed content:", assistantMessage.content);
+      console.log("Contains thinking HTML:", assistantMessage.content.includes("thinking-content"));
+      
       addToChatHistory(assistantMessage);
       updateChatDisplay();
       
@@ -1135,12 +1162,14 @@ function setupPeerMessageHandler(conn, peerId) {
             const lastMessage = chatHistory[chatHistory.length - 1];
             if (lastMessage && lastMessage.type === 'assistant') {
               // Update existing message instead of creating a new one
-              lastMessage.content += responseContent;
+              lastMessage.content = removeThinkingContent(lastMessage.content + responseContent);
+              lastMessage.rawContent = (lastMessage.rawContent || lastMessage.content) + responseContent;
             } else {
               // Create a new assistant message
               addToChatHistory({
                 type: 'assistant',
-                content: responseContent,
+                content: removeThinkingContent(responseContent),
+                rawContent: responseContent,
                 requestId: message.requestId
               });
             }
@@ -1621,13 +1650,22 @@ form.addEventListener('submit', async (event) => {
       // Remove the thinking message
       chatHistory.pop();
       
-      // Now create the final assistant message with the complete response
+      console.log("Creating final message with content:", responseText);
+      console.log("Contains thinking tags:", responseText.includes("<think>"));
+      
       const assistantMessage = {
         type: 'assistant',
-        content: responseText,
+        content: removeThinkingContent(responseText), // Process thinking content just like peer messages
+        rawContent: responseText, // Store raw content with thinking tags
         requestId: requestId,
+        fromPeer: 'Host', // Explicitly mark as from host for attribution
         isComplete: true
       };
+      
+      // Log the processed content
+      console.log("Processed content:", assistantMessage.content);
+      console.log("Contains thinking HTML:", assistantMessage.content.includes("thinking-content"));
+      
       addToChatHistory(assistantMessage);
       updateChatDisplay();
       
