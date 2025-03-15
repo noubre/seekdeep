@@ -12,8 +12,9 @@ A P2P-enabled desktop application that interfaces with a local LLM (Ollama) usin
 - **Collaborative and individual chat modes** for flexible peer interactions
 - Display of "thinking" content from LLMs that expose it
 - Built with Pear Runtime for cross-platform desktop support
-- Keyboard shortcuts for improved productivity (Ctrl/Cmd + Enter to submit) (Not tested)
+- Keyboard shortcuts for improved productivity (Ctrl/Cmd + Enter to submit)
 - Supports multiple concurrent peers in both collaborative and individual modes
+- Robust mode management to maintain consistent experience across peers
 
 
 
@@ -31,9 +32,9 @@ Before running SeekDeep, make sure you have:
 
 1. **Node.js** (v18 or later) and npm installed
 2. **Pear Runtime** installed (from [Pears.com](https://pears.com) or the Holepunch equivalent)
-3. **Ollama** installed and running with the DeepSeek model
+3. **Ollama** installed and running with at least one model
    - Download from [ollama.ai](https://ollama.ai)
-   - Run: `ollama pull deepseek-r1:1.5b` (Haven't tested other models yet.)
+   - Run: `ollama pull deepseek-r1:1.5b` (or another model of your choice)
 
 ## Installation
 
@@ -54,7 +55,7 @@ Before running SeekDeep, make sure you have:
 
 The server component makes your local Ollama instance accessible over P2P:
 
-1. Make sure Ollama is running with the DeepSeek model:
+1. Make sure Ollama is running with your desired model:
    ```bash
    ollama run deepseek-r1:1.5b
    ```
@@ -70,7 +71,7 @@ The server component makes your local Ollama instance accessible over P2P:
 
 ### Running the Desktop App
 
-1. Make sure Ollama is running with the DeepSeek model.
+1. Make sure Ollama is running with your chosen model.
 
 2. Launch the app in development mode:
    ```bash
@@ -131,11 +132,11 @@ This ensures that all peers have access to the same models available on the host
 SeekDeep offers two collaboration modes when interacting with peers:
 
 - **Collaborative Mode**: When a peer sends a query to the host's LLM, both the message and response are visible to everyone in the chat. All peers see all conversations.
-- **Individual Mode**: When a peer sends a query, the message and response are only visible to that peer, keeping each user's conversation private. (Not tested fully yet)
+- **Private Mode (Default)**: When a peer sends a query, the message and response are only visible to that peer, keeping each user's conversation private.
 
-Only the host can switch between modes using the dropdown in the UI. As a host, when you change modes, all connected peers chat modes be updated automatically.
+Only the host can switch between modes using the dropdown in the UI. When a host changes modes, all connected peers' chat modes are updated automatically. For security and consistency, all peers start in private mode by default, and mode updates are only accepted from the host or server - not from other peers.
 
-### Keyboard Shortcuts (Not tested)
+### Keyboard Shortcuts
 
 - **Ctrl/Cmd + Enter**: Submit the current prompt
 - **Enter**: Submit the current prompt (unless Shift is held)
@@ -227,8 +228,8 @@ Only the host can switch between modes using the dropdown in the UI. As a host, 
                  |                   |                    |                  |
       +----------v----------+  +----v---------------+ +--v------------------+
       |                     |  |                    | |                     |
-      |   Models Sharing    |  |   Mode Selection   | |   Message Relay     |
-      | (Host -> Peers)     |  |                    | | (Peers <-> Peers)   |
+      |   Models Sharing    |  |   Mode Management  | |   Message Relay     |
+      | (Host -> Peers)     |  | (Host -> Peers)    | | (Peers <-> Peers)   |
       +----------+----------+  +----+---------------+ +--+------------------+
                  |                  |                    |
                  v                  v                    v
@@ -252,15 +253,39 @@ Only the host can switch between modes using the dropdown in the UI. As a host, 
          | 4. Update UI                         | 3. models_update                    |
          |                                      |                                     |
          +--------------------------------------+-------------------------------------+
-                                                
-+------------------+                   +------------------+                  +------------------+
-|                  |  1. peer_message  |                  | 2. Forward       |                  |
-|      Peer A      +------------------>+      Server      +----------------->+     Peer B       |
-|                  |                   |                  |                  |                  |
-+------------------+                   +------------------+                  +------------------+
+
+Mode Update Flow:
++------------------+                   +------------------+                  
+|                  |                   |                  |                  
+|      Host        +------------------>+      Peer        |                  
+|                  |  mode_update      |                  |                  
++------------------+                   +--------^---------+                  
+                                                |
+                                                | Rejects mode updates
+                                                | from non-host peers
++------------------+                   +--------+---------+
+|                  |  mode_update      |                  |
+|     Other Peer   +------------------>+      Peer        |
+|                  |    (Ignored)      |                  |
++------------------+                   +------------------+
 ```
 
 ## Implementation Details
+
+### Mode Management Protocol
+
+The mode management protocol has been enhanced to ensure consistency:
+
+1. **Default Mode**: The system starts in private mode by default (separate chats)
+2. **Host Control**: Only the host can change the mode setting
+3. **Propagation**: When the host changes mode, the change is broadcast to all peers
+4. **Security**: Peers verify the source of mode updates and only accept changes from the host or server
+5. **Validation**: Mode updates from non-host peers are logged but ignored
+
+Key benefits of this approach:
+- Prevents mode changes when new peers join the network
+- Maintains consistent chat mode across all peers
+- Prevents potential manipulation of mode settings
 
 ### Model Sharing Protocol
 
@@ -283,16 +308,16 @@ Peers can also request updated models by clicking the refresh button, which:
 
 ### Message Types
 
-| Message Type    | Purpose                                   | Direction        |
-|-----------------|-------------------------------------------|------------------|
-| handshake       | Initialize connection                     | Peer → Host      |
-| handshake_ack   | Acknowledge connection                    | Host → Peer      |
-| models_update   | Share available models                    | Host → Peer      |
-| model_request   | Request available models                  | Peer → Host      |
-| query           | Send LLM query                            | Peer → Host      |
-| response        | Stream LLM response                       | Host → Peer      |
-| mode_update     | Change collaboration mode                 | Host → Peer      |
-| peer_message    | Relay messages between peers              | Peer ↔ Peer      |
+| Message Type    | Purpose                                   | Direction        | Validation                   |
+|-----------------|-------------------------------------------|------------------|------------------------------|
+| handshake       | Initialize connection                     | Peer → Host      | -                            |
+| handshake_ack   | Acknowledge connection                    | Host → Peer      | -                            |
+| models_update   | Share available models                    | Host → Peer      | -                            |
+| model_request   | Request available models                  | Peer → Host      | -                            |
+| query           | Send LLM query                            | Peer → Host      | -                            |
+| response        | Stream LLM response                       | Host → Peer      | -                            |
+| mode_update     | Change collaboration mode                 | Host → Peer      | Must come from host/server   |
+| peer_message    | Relay messages between peers              | Peer ↔ Peer      | -                            |
 
 ### Message Examples
 
@@ -313,7 +338,7 @@ Below are examples of the actual JSON message structures used in the P2P communi
   "type": "handshake_ack",
   "status": "connected",
   "hostId": "z9y8x7w6v5u...",
-  "isCollaborativeMode": true
+  "isCollaborativeMode": false
 }
 ```
 
@@ -393,55 +418,18 @@ Below are examples of the actual JSON message structures used in the P2P communi
 SeekDeep offers two collaboration modes when interacting with peers:
 
 - **Collaborative Mode**: When a peer sends a query to the host's LLM, both the message and response are visible to everyone in the chat. All peers see all conversations.
-- **Individual Mode**: When a peer sends a query, the message and response are only visible to that peer, keeping each user's conversation private.
+- **Private Mode (Default)**: When a peer sends a query, the message and response are only visible to that peer, keeping each user's conversation private.
 
-Only the host can switch between modes using the dropdown in the UI. As a host, when you change modes, all connected peers chat modes be updated automatically.
+Only the host can switch between modes using the dropdown in the UI. When the host changes modes, all connected peers' chat modes are updated automatically. The system now verifies that mode updates only come from the host or server, preventing new peers from inadvertently changing the modes of existing peers.
 
 ### Collaboration Flow
 
-1. **Host Sets Mode**: The host selects either collaborative or private mode using the dropdown
-2. **Mode Broadcast**: The selection is automatically broadcast to all connected peers
-3. **UI Update**: All peers receive a system message confirming the current mode
-4. **Message Routing**: 
-   - In collaborative mode: all messages and responses are shared with all peers
-   - In private mode: each peer only sees their own messages and responses
+When in collaborative mode:
+1. All messages from all peers are broadcast to everyone
+2. Each message includes a "fromPeer" attribution
+3. The host processes all LLM queries and broadcasts responses to all peers
 
-### User Experience 
-
-In collaborative mode, the application creates a shared workspace where:
-- All users can see queries from other users
-- All users can see responses to any query
-- Messages are color-coded and labeled with the sender's name
-- The chat history becomes a collective resource
-
-In private mode:
-- Each peer has a private conversation with the LLM
-- The host still processes all queries but doesn't share responses
-- The UI clearly indicates that conversations are private
-
-## Keyboard Shortcuts
-
-- **Ctrl/Cmd + Enter**: Submit the current prompt
-- **Enter**: Submit the current prompt (unless Shift is held)
-- **Shift + Enter**: New line in prompt (for multi-line prompts)
-- **Enter** (in topic key field): Join an existing chat without clicking the Join button
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Unknown Message Type**
-   - **Symptom**: Console errors showing "Unknown message type" 
-   - **Solution**: Ensure both host and peers are running the same version of the application. Refresh browser windows to load the latest code.
-
-2. **Model Dropdown Not Updating**
-   - **Symptom**: Peer's model dropdown doesn't show host's models
-   - **Solution**: Click the refresh button next to the model dropdown to request models from the host
-
-3. **Ollama Connection Errors**
-   - **Symptom**: "Failed to fetch" errors in console
-   - **Solution**: Make sure Ollama is running on port 11434 and you have the requested models installed
-
-## Compatibility with Pear Runtime
-
-// ... existing compatibility documentation ...
+When in private mode (default):
+1. Each peer's messages and responses are only visible to that peer
+2. Messages are only sent to the specific target peer
+3. The host processes LLM queries but only returns responses to the requesting peer
