@@ -1,0 +1,112 @@
+# SeekDeep Project Rules
+
+## Project Patterns
+
+### P2P Communication Patterns
+- Messages between peers always use JSON format with a `type` field
+- Request IDs are used to track message flows and match responses to requests
+- Host is the only peer that can change chat modes
+- Peers verify the source of mode updates to prevent unauthorized changes
+- Model sharing happens automatically during handshake and on-demand via refresh
+
+### Code Organization
+- `app.js` contains all desktop application logic
+- `server.js` contains the standalone server component
+- `index.html` contains both UI structure and styling
+- No build step or transpilation is used - vanilla JS only
+- Tests are organized by component (app, server, integration, e2e)
+
+### Error Handling
+- Network errors are caught and displayed as system messages
+- LLM API errors are displayed to the user with fallback options
+- JSON parsing errors are handled with try-catch blocks
+- Connection errors trigger appropriate UI updates
+
+### UI Conventions
+- Dark theme with Nord-inspired color palette
+- Message types are visually distinguished (user, assistant, system, thinking)
+- Peer messages are color-coded for easy identification
+- Markdown content is rendered with proper formatting
+- Thinking content is displayed in special containers
+
+## Implementation Paths
+
+### Adding a New Message Type
+1. Define the message structure with appropriate fields
+2. Add a handler in the message processing switch statement
+3. Create a UI rendering function for the new message type
+4. Update the message history tracking
+
+### Implementing a New Feature
+1. Add UI elements to index.html if needed
+2. Implement the core functionality in app.js
+3. Add event listeners and handlers
+4. Update the P2P protocol if the feature requires peer communication
+5. Add appropriate tests
+
+### Extending P2P Capabilities
+1. Define new message types in the protocol
+2. Implement handlers in the connection.on('data') callback
+3. Add validation for message sources if needed
+4. Update UI to reflect new capabilities
+
+## User Preferences
+
+### Code Style
+- 2-space indentation
+- Single quotes for strings
+- Semicolons at end of statements
+- Clear function and variable names
+- Comments for complex logic
+
+### Documentation
+- Code comments for non-obvious functionality
+- Clear README with setup instructions
+- Screenshots for visual reference
+- Diagrams for architecture and data flows
+
+### Testing
+- Unit tests for individual components
+- Integration tests for cross-component functionality
+- End-to-end tests for user workflows
+- Mock objects for external dependencies
+
+## Known Challenges
+
+### P2P Networking
+- NAT traversal can be challenging in some network environments
+- Connection stability varies based on network conditions
+- Scaling beyond ~20 peers affects performance
+- Message ordering is not guaranteed
+
+### LLM Integration
+- Ollama must be installed and running
+- Model availability varies between users
+- Response times depend on hardware capabilities
+- Streaming responses require special handling
+
+### Desktop Integration
+- Pear Runtime must be installed
+- Window dimensions are fixed
+- Limited access to system resources
+- Cross-platform compatibility considerations
+
+## Tool Usage Patterns
+
+### Development Workflow
+- Use `pear run --dev .` for development
+- Run `node server.js` for standalone server
+- Use `npm test` for running test suite
+- Check `npm run test:coverage` for test coverage
+
+### Debugging
+- Check browser console for client-side errors
+- Server logs provide P2P connection details
+- Request IDs help track message flow
+- System messages show important status updates
+
+### Deployment
+- Package with Pear for desktop distribution
+- Ensure Ollama is installed on target systems
+- Document P2P connection process for users
+- Provide sample commands for server setup
