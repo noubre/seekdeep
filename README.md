@@ -30,8 +30,11 @@ A P2P-enabled desktop application that interfaces with a local LLM (Ollama) usin
 
 Before running SeekDeep, make sure you have:
 
-1. **Node.js** (v18 or later) and npm installed
-2. **Pear Runtime** installed (from [Pears.com](https://pears.com) or the Holepunch equivalent)
+1. **Node.js** (v18 or later) and **npm** installed
+2. **Pear Runtime** installed (from [Pears.com](https://pears.com)) or just run:
+  ```bash
+  npx pear
+  ```
 3. **Ollama** installed and running with at least one model
    - Download from [ollama.ai](https://ollama.ai)
    - Run: `ollama pull deepseek-r1:1.5b` (or another model of your choice)
@@ -79,13 +82,13 @@ The server component makes your local Ollama instance accessible over P2P:
    pear run --dev .
    
    // To run more instances:
-   pear run --dev path/to/seekeep
+   pear run --dev path/to/seekdeep
 
    ```
 
 3. The app window will open, and you can start entering prompts in the text area and clicking "Seek" (or pressing Ctrl+Enter) to get responses.
 
-4. The app will automatically discover and connect to peers on the P2P network using Hyperswarm.
+4. The app will automatically discover and connect to peers on the P2P network using Hyperswarm that have your key.
 
 ### Desktop App as Host/Server
 
@@ -113,7 +116,7 @@ SeekDeep now supports switching between different LLM models:
    ollama pull gemma:7b
    ```
 4. The model selection is used for all subsequent queries until changed.
-5. The host's model selection determines which model processes queries for all connected peers.
+5. Each peer can choose to interact with a different model from the host.
 
 ### Model Sharing Between Host and Peers
 
@@ -132,9 +135,9 @@ This ensures that all peers have access to the same models available on the host
 SeekDeep offers two collaboration modes when interacting with peers:
 
 - **Collaborative Mode**: When a peer sends a query to the host's LLM, both the message and response are visible to everyone in the chat. All peers see all conversations.
-- **Private Mode (Default)**: When a peer sends a query, the message and response are only visible to that peer, keeping each user's conversation private.
+- **Private Mode (Default)**: When a peer sends a query, the message and response are only visible to that peer, keeping each user's conversations separate. The host has access to the logs from Ollama and can see what queries are sent.
 
-Only the host can switch between modes using the dropdown in the UI. When a host changes modes, all connected peers' chat modes are updated automatically. For security and consistency, all peers start in private mode by default, and mode updates are only accepted from the host or server - not from other peers.
+Only the host can switch between modes using the dropdown in the UI. When a host changes the mode, all connected peers' chat modes are updated automatically. For security and consistency, all peers start in private mode by default, and mode updates are only accepted from the host or server - not from other peers.
 
 ### Keyboard Shortcuts
 
@@ -212,38 +215,6 @@ seekdeep/
 - No built-in load balancing across multiple peers with Ollama
 - No clustering or sharding of conversations
 - No persistence of chat history between sessions
-
-## Known Issues
-
-### P2P Networking
-- Occasional connection drops in unstable networks
-- Limited scalability beyond ~20 concurrent peers
-- No automatic reconnection after network interruptions
-
-### LLM Integration
-- Dependency on Ollama being installed and running
-- Limited error handling for Ollama API failures
-- No fallback when requested model is unavailable
-
-### User Interface
-- Fixed window dimensions with limited responsiveness
-- No dark/light theme toggle
-- Limited accessibility features
-
-## Roadmap
-
-### In Progress
-- Enhancing testing coverage for P2P functionality
-- Improving error handling for network and API failures
-- Optimizing performance for larger peer groups
-
-### Planned Features
-- Persistence for chat history between sessions
-- Peer authentication mechanisms for more secure sessions
-- Offline mode support when Ollama is unavailable
-- Mobile platform extensions
-- Enhanced error recovery
-- Advanced LLM parameter controls
 
 ## System Architecture
 
