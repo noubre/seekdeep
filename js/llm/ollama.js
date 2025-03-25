@@ -360,9 +360,15 @@ async function handlePeerQuery(conn, message, peerId) {
     if (getCollaborativeMode()) {
       addToChatHistory({
         type: 'assistant',
-        content: parsedResult,
+        content: formatThinkingContent(parsedResult), // Process thinking content
+        rawContent: parsedResult, // Store raw content with thinking tags
         requestId: requestId,
         fromPeer: peerName
+      });
+      
+      console.log("Added response to host's chat history with thinking content:", {
+        hasThinkingTags: parsedResult.includes("<think>"),
+        hasThinkingHTML: formatThinkingContent(parsedResult).includes("thinking-content")
       });
     }
   } catch (error) {
@@ -405,7 +411,7 @@ async function queryLocalLLM(model, prompt) {
       body: JSON.stringify({
         model,
         prompt,
-        stream: false // No streaming for peer queries to simplify the implementation
+        stream: true // Use streaming to properly capture thinking content
       })
     });
     
@@ -413,8 +419,51 @@ async function queryLocalLLM(model, prompt) {
       throw new Error(`HTTP error: ${response.status}`);
     }
     
-    const text = await response.text();
-    return text;
+    // Handle streaming response
+    const reader = response.body.getReader();
+    let decoder = new TextDecoder();
+    let responseText = '';
+    
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      
+      const chunk = decoder.decode(value);
+      console.log("Raw chunk from Ollama for peer query:", chunk);
+      
+      try {
+        // For streaming responses, each chunk should be a JSON object
+        const lines = chunk.split('\n').filter(line => line.trim());
+        
+        for (const line of lines) {
+          try {
+            const json = JSON.parse(line);
+            
+            // Extract just the response text from the JSON
+            const responseChunk = json.response || '';
+            console.log("Extracted response chunk for peer query:", responseChunk);
+            
+            // Add the response chunk to our full response text
+            responseText += responseChunk;
+          } catch (innerErr) {
+            // If a line can't be parsed as JSON, ignore it
+            console.log("Couldn't parse line as JSON:", line);
+          }
+        }
+      } catch (parseError) {
+        console.warn("Error parsing chunk as JSON:", parseError);
+        // If not valid JSON, use the parseOllamaResponse as a fallback
+        const fallbackResponse = parseOllamaResponse(chunk);
+        if (fallbackResponse) {
+          responseText += fallbackResponse;
+        }
+      }
+    }
+    
+    console.log("Complete response text for peer query:", responseText);
+    console.log("Contains thinking tags:", responseText.includes("<think>"));
+    
+    return responseText;
   } catch (error) {
     console.error('Error querying local LLM:', error);
     throw error;

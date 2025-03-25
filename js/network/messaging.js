@@ -240,6 +240,7 @@ function handleResponseMessage(message) {
     }
     
     console.log("Processed response content:", responseContent);
+    console.log("Contains thinking tags:", responseContent.includes("<think>"));
     
     // Make sure responseContent is a string
     if (responseContent && typeof responseContent !== 'string') {
@@ -255,17 +256,30 @@ function handleResponseMessage(message) {
       
     if (shouldShowResponse) {
       console.log("Adding response to chat history");
+      console.log("Response contains thinking tags:", responseContent.includes("<think>"));
+      
       // Add to existing assistant message or create new one
       const lastMessage = findLastMessageByRequestId(message.requestId, 'assistant');
       if (lastMessage) {
         // Update existing message instead of creating a new one
         lastMessage.content = formatThinkingContent(lastMessage.content + responseContent);
         lastMessage.rawContent = (lastMessage.rawContent || lastMessage.content) + responseContent;
+        
+        console.log("Updated existing message with thinking content:", {
+          hasThinkingTags: lastMessage.rawContent.includes("<think>"),
+          hasThinkingHTML: lastMessage.content.includes("thinking-content")
+        });
       } else {
         // Create a new assistant message
+        const formattedContent = formatThinkingContent(responseContent);
+        console.log("Formatted content for new message:", {
+          hasThinkingTags: responseContent.includes("<think>"),
+          hasThinkingHTML: formattedContent.includes("thinking-content")
+        });
+        
         addToChatHistory({
           type: 'assistant',
-          content: formatThinkingContent(responseContent),
+          content: formattedContent,
           rawContent: responseContent,
           requestId: message.requestId
         });
@@ -335,6 +349,10 @@ function handlePeerAssistantMessage(message, peerId) {
   // Keep track of the current request ID we're handling
   const currentRequestId = message.requestId;
   console.log(`Processing assistant message for requestId: ${currentRequestId}, isNewMessage: ${isNewMessage}`);
+  console.log(`Peer message contains thinking tags:`, message.content.includes("<think>"));
+  
+  // Use rawContent if available, otherwise fall back to content
+  const messageContent = message.rawContent || message.content;
   
   // Find the last message with the same requestId
   const matchingLastMessage = findLastMessageByRequestId(currentRequestId, 'assistant');
@@ -344,11 +362,18 @@ function handlePeerAssistantMessage(message, peerId) {
     // Create a brand new assistant message
     console.log(`Creating new assistant message from ${message.fromPeer} with requestId: ${currentRequestId}`);
     
+    // Format the content for display
+    const formattedContent = formatThinkingContent(messageContent);
+    console.log(`New peer message thinking content:`, {
+      hasThinkingTags: messageContent.includes("<think>"),
+      hasThinkingHTML: formattedContent.includes("thinking-content")
+    });
+    
     // Create a new message in the chat history
     const newAssistantMessage = {
       type: 'assistant',
-      content: formatThinkingContent(message.content),
-      rawContent: message.content, // Store the raw content with thinking tags
+      content: formattedContent,
+      rawContent: messageContent, // Store the raw content with thinking tags
       timestamp: Date.now(),
       fromPeer: message.fromPeer,
       requestId: currentRequestId
@@ -366,10 +391,15 @@ function handlePeerAssistantMessage(message, peerId) {
     }
     
     // Add the new content to the raw content
-    matchingLastMessage.rawContent += message.content;
+    matchingLastMessage.rawContent += messageContent;
     
     // Update the displayed content with thinking tags properly formatted
     matchingLastMessage.content = formatThinkingContent(matchingLastMessage.rawContent);
+    
+    console.log(`Updated peer message thinking content:`, {
+      hasThinkingTags: matchingLastMessage.rawContent.includes("<think>"),
+      hasThinkingHTML: matchingLastMessage.content.includes("thinking-content")
+    });
     
     // Update display (this will be handled by addToChatHistory)
     addToChatHistory(matchingLastMessage);
@@ -377,10 +407,13 @@ function handlePeerAssistantMessage(message, peerId) {
     // No matching message found, create a new one anyway
     console.log(`No matching message found for requestId: ${currentRequestId}, creating new`);
     
+    // Format the content for display
+    const formattedContent = formatThinkingContent(messageContent);
+    
     const newAssistantMessage = {
       type: 'assistant',
-      content: formatThinkingContent(message.content),
-      rawContent: message.content,
+      content: formattedContent,
+      rawContent: messageContent,
       timestamp: Date.now(),
       fromPeer: message.fromPeer,
       requestId: currentRequestId
