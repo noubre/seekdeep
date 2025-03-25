@@ -61,6 +61,7 @@ The SeekDeep project is a P2P-enabled desktop application that interfaces with l
 - Added support for "thinking" content display
 - Enhanced chat mode management with validation
 - Improved error handling for network and API failures
+- Updated README.md with detailed project structure, known issues, and roadmap
 
 ## Next Steps
 1. Enhance testing coverage for P2P functionality

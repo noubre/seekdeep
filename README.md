@@ -143,6 +143,54 @@ Only the host can switch between modes using the dropdown in the UI. When a host
 - **Shift + Enter**: New line in prompt (for multi-line prompts)
 - **Enter** (in topic key field): Join an existing chat without clicking the Join button
 
+## Project Structure
+
+The SeekDeep project is organized into a modular structure with clear separation of concerns:
+
+```
+seekdeep/
+├── app.js                 # Main desktop application logic
+├── index.html             # Main UI structure and styling
+├── server.js              # Optional standalone server component
+├── package.json           # Project configuration and dependencies
+├── js/                    # JavaScript modules
+│   ├── main.js            # Main application entry point
+│   ├── llm/               # LLM integration
+│   │   ├── models.js      # Model management
+│   │   └── ollama.js      # Ollama API integration
+│   ├── messages/          # Message handling
+│   │   ├── formatting.js  # Message formatting utilities
+│   │   └── history.js     # Chat history management
+│   ├── network/           # Networking components
+│   │   ├── hyperswarm.js  # P2P networking
+│   │   └── messaging.js   # Message protocol implementation
+│   ├── session/           # Session management
+│   │   ├── modes.js       # Chat mode management
+│   │   └── peers.js       # Peer connection handling
+│   └── ui/                # User interface components
+│       ├── elements.js    # UI element creation
+│       ├── events.js      # Event handlers
+│       └── rendering.js   # Display rendering
+├── lib/                   # External libraries
+│   └── marked.min.js      # Markdown parser
+├── memory-bank/           # Project documentation
+│   ├── activeContext.md   # Current work focus
+│   ├── productContext.md  # Product context and goals
+│   ├── progress.md        # Implementation progress
+│   ├── projectbrief.md    # Project overview
+│   ├── systemPatterns.md  # System architecture
+│   └── techContext.md     # Technical details
+├── test/                  # Test files
+│   ├── app.test.js        # Unit tests for app.js
+│   ├── server.test.js     # Unit tests for server.js
+│   ├── integration.test.js # Integration tests
+│   ├── e2e.test.js        # End-to-end tests
+│   └── setupTests.js      # Test configuration
+└── screenshots/           # Application screenshots
+    ├── desktop.jpeg       # Desktop UI screenshot
+    └── server.jpeg        # Server UI screenshot
+```
+
 ## Scalability
 
 ### Peer Capacity
@@ -164,6 +212,38 @@ Only the host can switch between modes using the dropdown in the UI. When a host
 - No built-in load balancing across multiple peers with Ollama
 - No clustering or sharding of conversations
 - No persistence of chat history between sessions
+
+## Known Issues
+
+### P2P Networking
+- Occasional connection drops in unstable networks
+- Limited scalability beyond ~20 concurrent peers
+- No automatic reconnection after network interruptions
+
+### LLM Integration
+- Dependency on Ollama being installed and running
+- Limited error handling for Ollama API failures
+- No fallback when requested model is unavailable
+
+### User Interface
+- Fixed window dimensions with limited responsiveness
+- No dark/light theme toggle
+- Limited accessibility features
+
+## Roadmap
+
+### In Progress
+- Enhancing testing coverage for P2P functionality
+- Improving error handling for network and API failures
+- Optimizing performance for larger peer groups
+
+### Planned Features
+- Persistence for chat history between sessions
+- Peer authentication mechanisms for more secure sessions
+- Offline mode support when Ollama is unavailable
+- Mobile platform extensions
+- Enhanced error recovery
+- Advanced LLM parameter controls
 
 ## System Architecture
 
