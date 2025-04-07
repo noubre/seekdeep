@@ -1,20 +1,19 @@
 # SeekDeep
 
-A P2P-enabled desktop application that interfaces with a local LLM (Ollama) using Pear Runtime, Hyperswarm, and Hypercore crypto, Node, and b4a.
+A P2P-enabled desktop application that interfaces with local LLMs (Ollama) using Pear Runtime, Hyperswarm, and Hypercore technologies.
 
-## Features
+## Key Features
 
-- Clean, minimalist UI for interacting with local LLMs
-- P2P networking via Hyperswarm for decentralized connections
-- Direct P2P communication protocol for sharing LLM capabilities
-- Streaming responses from LLM for real-time feedback
-- **Markdown rendering** for rich, formatted LLM responses
-- **Collaborative and individual chat modes** for flexible peer interactions
-- Display of "thinking" content from LLMs that expose it
-- Built with Pear Runtime for cross-platform desktop support
-- Keyboard shortcuts for improved productivity (Ctrl/Cmd + Enter to submit)
-- Supports multiple concurrent peers in both collaborative and individual modes
-- Robust mode management to maintain consistent experience across peers
+- **P2P Networking**: Decentralized connections via Hyperswarm without central servers
+- **LLM Integration**: Direct interface with Ollama for local LLM access
+- **Dual Chat Modes**: 
+  - Collaborative mode where all peers see all messages
+  - Private mode where each peer has a separate conversation
+- **Model Sharing**: Host shares available models with connected peers
+- **Markdown Rendering**: Rich formatting of LLM responses
+- **Thinking Content Display**: Visibility into the LLM's reasoning process if available
+- **Response Streaming**: Real-time display of LLM responses as they're generated
+- **Cross-Platform**: Built with Pear Runtime for desktop support
 
 
 
@@ -39,7 +38,7 @@ Before running SeekDeep, make sure you have:
    - Download from [ollama.ai](https://ollama.ai)
    - Run: `ollama pull deepseek-r1:1.5b` (or another model of your choice)
 
-## Installation
+## Installation if not running through Pear seeding
 
 1. Clone this repository:
    ```bash
@@ -53,24 +52,6 @@ Before running SeekDeep, make sure you have:
    ```
 
 ## Usage
-
-### Running the Server
-
-The server component makes your local Ollama instance accessible over P2P:
-
-1. Make sure Ollama is running with your desired model:
-   ```bash
-   ollama run deepseek-r1:1.5b
-   ```
-
-2. Start the server:
-   ```bash
-   node server.js
-   ```
-
-3. Note the public key displayed in the terminal – this is your server's unique identifier on the P2P network.
-
-> **Note**: The server app is optional and only needed when you want to connect to a remote machine where you can't run the desktop app directly. The desktop app can act as both a client and server/host without requiring the separate server component.
 
 ### Running the Desktop App
 
@@ -90,6 +71,12 @@ The server component makes your local Ollama instance accessible over P2P:
 
 4. The app will automatically discover and connect to peers on the P2P network using Hyperswarm that have your key.
 
+### Running the Desktop App through Pear seeding
+
+1. Launch from Pear seed:
+  ```bash
+  pear run [seed]
+
 ### Desktop App as Host/Server
 
 The desktop app has built-in server capabilities, which means:
@@ -100,6 +87,25 @@ The desktop app has built-in server capabilities, which means:
 4. The standalone server is primarily useful for headless environments or remote machines
 
 When you start the app, it automatically runs in host mode until you join an existing chat.
+
+### Running the Server
+
+The server component makes your local Ollama instance accessible over P2P:
+
+1. Make sure Ollama is running with your desired model:
+   ```bash
+   ollama run deepseek-r1:1.5b
+   ```
+
+2. Start the server:
+   ```bash
+   node server.js
+   ```
+
+3. Note the public key displayed in the terminal – this is your server's unique identifier on the P2P network.
+
+> **Note**: The server app is optional and only needed when you want to connect to a remote machine where you can't run the desktop app directly. The desktop app can act as both a client and server/host without requiring the separate server component.
+
 
 ### Model Selection
 
@@ -135,16 +141,9 @@ This ensures that all peers have access to the same models available on the host
 SeekDeep offers two collaboration modes when interacting with peers:
 
 - **Collaborative Mode**: When a peer sends a query to the host's LLM, both the message and response are visible to everyone in the chat. All peers see all conversations.
-- **Private Mode (Default)**: When a peer sends a query, the message and response are only visible to that peer, keeping each user's conversations separate. The host has access to the logs from Ollama and can see what queries are sent.
+- **Private Mode (Default)**: When a peer sends a query, the message and response are only visible to that peer, keeping each user's conversations separate. Note that this is not "private", because the host has access to the logs from Ollama and can see what queries are sent.
 
 Only the host can switch between modes using the dropdown in the UI. When a host changes the mode, all connected peers' chat modes are updated automatically. For security and consistency, all peers start in private mode by default, and mode updates are only accepted from the host or server - not from other peers.
-
-### Keyboard Shortcuts
-
-- **Ctrl/Cmd + Enter**: Submit the current prompt
-- **Enter**: Submit the current prompt (unless Shift is held)
-- **Shift + Enter**: New line in prompt (for multi-line prompts)
-- **Enter** (in topic key field): Join an existing chat without clicking the Join button
 
 ## Project Structure
 
