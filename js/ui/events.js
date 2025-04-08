@@ -18,8 +18,8 @@ import {
   updateRefreshModelsTooltip
 } from './elements.js';
 import { addToChatHistory } from '../messages/history.js';
-import { initializeNewChat, joinExistingChat } from '../network/hyperswarm.js';
-import { setChatMode, isCollaborativeMode, isSessionHost } from '../session/modes.js';
+import { joinExistingChat } from '../network/hyperswarm.js';
+import { setChatMode, isSessionHost } from '../session/modes.js';
 import { fetchAvailableModels, requestModelsFromHost } from '../llm/models.js';
 import { ask } from '../llm/ollama.js';
 

@@ -8,6 +8,7 @@ import { isSessionHost } from '../session/modes.js';
 import { conns } from '../network/hyperswarm.js';
 
 // Default models list - these are common Ollama models
+// TODO: Remove all but one?
 const DEFAULT_MODELS = [
   { id: 'deepseek-r1:1.5b', name: 'DeepSeek 1.5b' },
   { id: 'llama2:7b', name: 'Llama 2 7B' },
