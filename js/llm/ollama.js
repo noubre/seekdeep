@@ -7,9 +7,7 @@ import { addToChatHistory } from '../messages/history.js';
 import { 
   generateRequestId, 
   setActiveRequestId, 
-  addActiveRequest, 
-  clearActiveRequestId, 
-  removeActiveRequest 
+  addActiveRequest
 } from '../messages/history.js';
 import { parseOllamaResponse, formatThinkingContent } from '../messages/formatting.js';
 import { isSessionHost, getCollaborativeMode } from '../session/modes.js';

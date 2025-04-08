@@ -2,13 +2,15 @@
 
 A P2P-enabled desktop application that interfaces with local LLMs (Ollama) using Pear Runtime, Hyperswarm, and Hypercore technologies.
 
+This is a work in progress and under development.
+
 ## Key Features
 
 - **P2P Networking**: Decentralized connections via Hyperswarm without central servers
 - **LLM Integration**: Direct interface with Ollama for local LLM access
 - **Dual Chat Modes**: 
   - Collaborative mode where all peers see all messages
-  - Private mode where each peer has a separate conversation
+  - Individual mode where each peer has a separate conversation
 - **Model Sharing**: Host shares available models with connected peers
 - **Markdown Rendering**: Rich formatting of LLM responses
 - **Thinking Content Display**: Visibility into the LLM's reasoning process if available
@@ -56,26 +58,32 @@ Before running SeekDeep, make sure you have:
 ### Running the Desktop App
 
 1. Make sure Ollama is running with your chosen model.
+  ```bash
+  ollama ps
+
+  ```
 
 2. Launch the app in development mode:
    ```bash
    cd seekdeep
    pear run --dev .
    
-   // To run more instances:
+   // Or:
    pear run --dev path/to/seekdeep
 
    ```
 
 3. The app window will open, and you can start entering prompts in the text area and clicking "Seek" (or pressing Ctrl+Enter) to get responses.
 
-4. The app will automatically discover and connect to peers on the P2P network using Hyperswarm that have your key.
+4. The app will automatically discover and connect to peers on the P2P network using Hyperswarm.
 
 ### Running the Desktop App through Pear seeding
 
 1. Launch from Pear seed:
   ```bash
   pear run [seed]
+
+  ```
 
 ### Desktop App as Host/Server
 
@@ -112,7 +120,7 @@ The server component makes your local Ollama instance accessible over P2P:
 SeekDeep now supports switching between different LLM models:
 
 1. A model selector dropdown is available in the chat interface.
-2. By default, SeekDeep will fetch the list of available models from your local Ollama installation.
+2. By default, SeekDeep will fetch the list of available models from your local Ollama installation, or if connected to a host then the host's models will be listed.
 3. If you don't have specific models installed, you can install them with Ollama:
    ```bash
    # Install additional models
@@ -141,9 +149,9 @@ This ensures that all peers have access to the same models available on the host
 SeekDeep offers two collaboration modes when interacting with peers:
 
 - **Collaborative Mode**: When a peer sends a query to the host's LLM, both the message and response are visible to everyone in the chat. All peers see all conversations.
-- **Private Mode (Default)**: When a peer sends a query, the message and response are only visible to that peer, keeping each user's conversations separate. Note that this is not "private", because the host has access to the logs from Ollama and can see what queries are sent.
+- **Individual Mode (Default)**: When a peer sends a query, the message and response are only visible to that peer, keeping each user's conversations separate. Note that this is not "private", because the host has access to the logs from Ollama and can see what queries are sent.
 
-Only the host can switch between modes using the dropdown in the UI. When a host changes the mode, all connected peers' chat modes are updated automatically. For security and consistency, all peers start in private mode by default, and mode updates are only accepted from the host or server - not from other peers.
+Only the host can switch between modes using the dropdown in the UI. When a host changes the mode, all connected peers' chat modes are updated automatically. For security and consistency, all peers start in individual mode by default, and mode updates are only accepted from the host or server - not from other peers.
 
 ## Project Structure
 
@@ -206,7 +214,7 @@ seekdeep/
 - **UI Performance**: The chat display must render all messages from all peers, which can become resource-intensive with many active users
 
 ### Performance Optimization
-- **Private Mode**: For larger groups, using private mode reduces message broadcasting overhead
+- **Individual Mode**: For larger groups, using individual mode reduces message broadcasting overhead
 - **Query Throttling**: The system naturally throttles queries as they are processed sequentially
 - **Host Selection**: For optimal performance, the peer with the strongest hardware and network connection should act as host
 
@@ -285,7 +293,7 @@ seekdeep/
                  v                  v                    v
       +----------+----------+  +----+---------------+ +--+------------------+
       |                     |  |                    | |                     |
-      | Refresh On Demand   |  | Collaborative Mode | | Private Mode        |
+      | Refresh On Demand   |  | Collaborative Mode | | Individual Mode     |
       | (Peer -> Host)      |  | (All peers see all | | (Each peer only sees|
       |                     |  |  messages)         | |  their own messages)|
       +---------------------+  +--------------------+ +---------------------+
@@ -326,7 +334,7 @@ Mode Update Flow:
 
 The mode management protocol has been enhanced to ensure consistency:
 
-1. **Default Mode**: The system starts in private mode by default (separate chats)
+1. **Default Mode**: The system starts in individual mode by default (separate chats)
 2. **Host Control**: Only the host can change the mode setting
 3. **Propagation**: When the host changes mode, the change is broadcast to all peers
 4. **Security**: Peers verify the source of mode updates and only accept changes from the host or server
@@ -463,23 +471,3 @@ Below are examples of the actual JSON message structures used in the P2P communi
 }
 ```
 
-## Collaboration Modes
-
-SeekDeep offers two collaboration modes when interacting with peers:
-
-- **Collaborative Mode**: When a peer sends a query to the host's LLM, both the message and response are visible to everyone in the chat. All peers see all conversations.
-- **Private Mode (Default)**: When a peer sends a query, the message and response are only visible to that peer, keeping each user's conversation private.
-
-Only the host can switch between modes using the dropdown in the UI. When the host changes modes, all connected peers' chat modes are updated automatically. The system now verifies that mode updates only come from the host or server, preventing new peers from inadvertently changing the modes of existing peers.
-
-### Collaboration Flow
-
-When in collaborative mode:
-1. All messages from all peers are broadcast to everyone
-2. Each message includes a "fromPeer" attribution
-3. The host processes all LLM queries and broadcasts responses to all peers
-
-When in private mode (default):
-1. Each peer's messages and responses are only visible to that peer
-2. Messages are only sent to the specific target peer
-3. The host processes LLM queries but only returns responses to the requesting peer
