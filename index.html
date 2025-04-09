@@ -382,43 +382,127 @@
     
     #join-section {
       display: flex;
-      flex-direction: row;
-      align-items: center;
+      flex-direction: column;
       padding: 4px 8px;
       background-color: #171C27;
       margin: 0 4px;
       border-radius: 4px;
+      gap: 8px;
+    }
+
+    /* Join section styles */
+    .join-section-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px;
+      background-color: #232834;
+      border-radius: 4px;
+    }
+
+    .join-section-row label {
+      font-size: 13px;
+      color: #D8DEE9;
+      white-space: nowrap;
+      min-width: 120px;
+    }
+
+    .topic-display {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 1;
+    }
+
+    .topic-container {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 1;
+      background-color: #343F54;
+      padding: 6px 10px;
+      border-radius: 3px;
+      min-width: 0; /* Allow container to shrink */
+    }
+
+    .monospace {
+      font-family: SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+      color: #88C0D0;
+      font-size: 12px;
+      letter-spacing: -0.3px;
+      word-break: break-all;
+      max-width: 100%;
+      overflow-x: auto;
+      flex: 1;
+      min-width: 0; /* Allow text to shrink */
+    }
+
+    #copy-topic {
+      background-color: transparent;
+      border: none;
+      padding: 4px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #D8DEE9;
+      opacity: 0.7;
+      transition: opacity 0.2s;
+      flex-shrink: 0; /* Prevent button from shrinking */
+    }
+
+    #copy-topic:hover {
+      opacity: 1;
+    }
+
+    .join-controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 1;
     }
     
     #join-section input[type="text"] {
       flex: 1;
-      margin-left: 5px;
-      margin-right: 5px;
+      background-color: #343F54;
+      border: none;
+      color: #d0d0d0;
+      padding: 6px 10px;
+      border-radius: 3px;
+      font-size: 13px;
+      min-width: 0; /* Allow input to shrink */
     }
     
-    #join-section label {
-      font-size: 14px;
+    #join-button {
+      background-color: #5E81AC;
+      border: none;
+      color: #E5E9F0;
+      padding: 6px 12px;
+      border-radius: 3px;
+      font-size: 13px;
+      cursor: pointer;
+      flex-shrink: 0; /* Prevent button from shrinking */
+    }
+
+    #join-button:hover {
+      background-color: #81A1C1;
     }
     
     .mode-toggle {
       display: flex;
       align-items: center;
-      margin-top: 8px;
-      padding: 4px 0;
-    }
-    
-    .mode-toggle label {
-      margin-right: 10px;
-      white-space: nowrap;
+      gap: 8px;
     }
     
     .mode-toggle select {
       background-color: #343F54;
       border: none;
       color: #d0d0d0;
-      padding: 4px 8px;
+      padding: 6px 10px;
       border-radius: 3px;
-      font-size: 12px;
+      font-size: 13px;
+      flex: 1;
+      min-width: 200px;
     }
     
     .hidden {
@@ -540,16 +624,37 @@
   
   <!-- Join Session UI -->
   <div id="join-section">
-    <label for="topic-key">Join a friend's chat:</label>
-    <input type="text" id="topic-key" placeholder="Enter topic key..." />
-    <button id="join-button">Join Chat</button>
+    <div class="join-section-row">
+      <label>Current Topic:</label>
+      <div class="topic-display">
+        <div class="topic-container">
+          <span id="current-topic" class="monospace"></span>
+          <button id="copy-topic" title="Copy topic key">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
     
-    <div class="mode-toggle">
+    <div class="join-section-row">
+      <label for="topic-key">Join a friend's chat:</label>
+      <div class="join-controls">
+        <input type="text" id="topic-key" placeholder="Enter topic key..." />
+        <button id="join-button">Join Chat</button>
+      </div>
+    </div>
+    
+    <div class="join-section-row">
       <label for="chat-mode">Chat Mode:</label>
-      <select id="chat-mode">
-        <option value="collaborative">Collaborative (Shared Chat)</option>
-        <option value="private" selected>Private (Separate Chats)</option>
-      </select>
+      <div class="mode-toggle">
+        <select id="chat-mode">
+          <option value="collaborative">Collaborative (Shared Chat)</option>
+          <option value="private" selected>Private (Separate Chats)</option>
+        </select>
+      </div>
     </div>
   </div>
   

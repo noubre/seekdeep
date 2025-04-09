@@ -124,6 +124,9 @@ function initializeNewChat() {
   
   // Join swarm with our topic
   swarm.join(topic, { server: true, client: true });
+  
+  // Dispatch topic change event
+  document.dispatchEvent(new Event('swarmTopicChanged'));
 }
 
 /**
@@ -159,6 +162,9 @@ function joinExistingChat(topicKeyHex) {
     
     // Join the swarm with the provided topic
     swarm.join(topic, { server: true, client: true });
+    
+    // Dispatch topic change event
+    document.dispatchEvent(new Event('swarmTopicChanged'));
     
     return true;
   } catch (error) {
@@ -201,6 +207,9 @@ function leaveExistingChat() {
   
   // Reset host status (will be set again when creating/joining a new chat)
   setSessionHost(false);
+  
+  // Dispatch topic change event since topic is now cleared
+  document.dispatchEvent(new Event('swarmTopicChanged'));
 }
 
 /**

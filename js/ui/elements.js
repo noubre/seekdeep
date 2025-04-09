@@ -13,6 +13,8 @@ let joinButton;
 let chatModeSelect;
 let modelSelect;
 let refreshModelsButton;
+let currentTopicEl;
+let copyTopicButton;
 
 /**
  * Initialize UI element references
@@ -27,6 +29,8 @@ function initializeElements() {
   chatModeSelect = document.getElementById('chat-mode');
   modelSelect = document.getElementById('model-select');
   refreshModelsButton = document.getElementById('refresh-models');
+  currentTopicEl = document.getElementById('current-topic');
+  copyTopicButton = document.getElementById('copy-topic');
 }
 
 /**
@@ -125,6 +129,40 @@ function updateRefreshModelsTooltip(message) {
   }
 }
 
+/**
+ * Update the displayed topic key
+ * @param {string|null} topicKey - The topic key to display, or null to clear
+ */
+function updateTopicDisplay(topicKey) {
+  if (currentTopicEl) {
+    currentTopicEl.textContent = topicKey || '';
+    currentTopicEl.parentElement.style.display = topicKey ? 'flex' : 'none';
+  }
+}
+
+/**
+ * Initialize the copy topic button functionality
+ */
+function initializeCopyButton() {
+  if (copyTopicButton) {
+    copyTopicButton.addEventListener('click', async () => {
+      const topicKey = currentTopicEl.textContent;
+      if (topicKey) {
+        try {
+          await navigator.clipboard.writeText(topicKey);
+          const originalTitle = copyTopicButton.getAttribute('title');
+          copyTopicButton.setAttribute('title', 'Copied!');
+          setTimeout(() => {
+            copyTopicButton.setAttribute('title', originalTitle);
+          }, 2000);
+        } catch (err) {
+          console.error('Failed to copy topic key:', err);
+        }
+      }
+    });
+  }
+}
+
 // Export functions and elements
 export {
   // Functions
@@ -139,6 +177,8 @@ export {
   clearTopicKeyInput,
   setRefreshModelsLoading,
   updateRefreshModelsTooltip,
+  updateTopicDisplay,
+  initializeCopyButton,
   
   // Element references (for modules that need direct access)
   form,
@@ -149,5 +189,7 @@ export {
   joinButton,
   chatModeSelect,
   modelSelect,
-  refreshModelsButton
+  refreshModelsButton,
+  currentTopicEl,
+  copyTopicButton
 };

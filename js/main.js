@@ -20,9 +20,20 @@ function initializeApp() {
   
   // Initialize UI elements
   ui.initializeElements();
+  ui.initializeCopyButton();
   
   // Initialize network
   hyperswarm.initializeSwarm();
+  
+  // Set up topic display updates
+  const updateTopic = () => {
+    const topicHex = hyperswarm.getTopicHex();
+    ui.updateTopicDisplay(topicHex);
+  };
+  
+  // Update topic display when network state changes
+  document.addEventListener('swarmTopicChanged', updateTopic);
+  updateTopic(); // Initial update
   
   // Initialize LLM
   models.fetchAvailableModels();
