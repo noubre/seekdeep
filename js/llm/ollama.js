@@ -85,13 +85,18 @@ async function ask(model, prompt) {
         removeThinkingMessage(thinkingIndex);
       }
       
-      // Create a temporary thinking message to show progress
-      const thinkingMessage = {
-        type: 'thinking',
-        content: 'Generating response...',
-        requestId: requestId
+      // Create an assistant message that we'll update incrementally
+      const assistantMessage = {
+        type: 'assistant',
+        content: '',
+        rawContent: '',
+        requestId: requestId,
+        fromPeer: 'Host', // Explicitly mark as from host for attribution
+        isComplete: false
       };
-      addToChatHistory(thinkingMessage);
+      
+      // Add the initial empty message to the chat history
+      addToChatHistory(assistantMessage);
       
       while (true) {
         const { done, value } = await reader.read();
@@ -111,9 +116,12 @@ async function ask(model, prompt) {
           // Add the response chunk to our full response text
           responseText += responseChunk;
           
-          // Update the thinking message to show progress
-          thinkingMessage.content = `Generating response... (${Math.round(responseText.length / 10)} tokens)`;
-          updateThinkingMessage(thinkingMessage);
+          // Update our assistant message with the new chunk
+          assistantMessage.rawContent += responseChunk;
+          assistantMessage.content = formatThinkingContent(assistantMessage.rawContent);
+          
+          // Re-add the message to chat history to trigger UI update
+          addToChatHistory(assistantMessage);
           
           // Broadcast our own responses to connected peers in collaborative mode
           if (getCollaborativeMode()) {
@@ -126,9 +134,12 @@ async function ask(model, prompt) {
           if (fallbackResponse) {
             responseText += fallbackResponse;
             
-          // Update the thinking message to show progress
-          thinkingMessage.content = `Generating response... (${Math.round(responseText.length / 10)} tokens)`;
-          updateThinkingMessage(thinkingMessage);
+          // Update our assistant message with the new chunk
+          assistantMessage.rawContent += fallbackResponse;
+          assistantMessage.content = formatThinkingContent(assistantMessage.rawContent);
+          
+          // Re-add the message to chat history to trigger UI update
+          addToChatHistory(assistantMessage);
           
           if (getCollaborativeMode()) {
             streamToPeers(fallbackResponse, requestId);
@@ -137,34 +148,21 @@ async function ask(model, prompt) {
         }
       }
       
-      // Remove the thinking message
-      // Find the last thinking message with this requestId and remove it
-      const finalThinkingIndex = findThinkingMessageIndex(requestId);
-      if (finalThinkingIndex !== -1) {
-        removeThinkingMessage(finalThinkingIndex);
-      }
+      // Mark the message as complete
+      assistantMessage.isComplete = true;
       
-      console.log("Creating final message with content:", responseText);
-      console.log("Contains thinking tags:", responseText.includes("<think>"));
-      
-      const assistantMessage = {
-        type: 'assistant',
-        content: formatThinkingContent(responseText), // Process thinking content
-        rawContent: responseText, // Store raw content with thinking tags
-        requestId: requestId,
-        fromPeer: 'Host', // Explicitly mark as from host for attribution
-        isComplete: true
-      };
-      
-      // Log the processed content
+      // Log the final state
+      console.log("Final message content:", assistantMessage.rawContent);
+      console.log("Contains thinking tags:", assistantMessage.rawContent.includes("<think>"));
       console.log("Processed content:", assistantMessage.content);
       console.log("Contains thinking HTML:", assistantMessage.content.includes("thinking-content"));
       
+      // Re-add the message one last time to ensure final state is rendered
       addToChatHistory(assistantMessage);
       
-      // Send the complete response in the final chunk
+      // Send the isComplete signal to peers
       if (getCollaborativeMode()) {
-        streamToPeers(responseText, requestId, true);
+        streamToPeers("", requestId, true);
       }
       
       // Store this requestId as our activeRequestId
@@ -297,8 +295,8 @@ async function handlePeerQuery(conn, message, peerId) {
       }
     }
     
-    // Query the local LLM directly with streaming support
-    const result = await queryLocalLLM(message.model, message.prompt, requestId, peerName);
+    // Query the local LLM directly
+    const result = await queryLocalLLM(message.model, message.prompt);
     console.log("Raw result from Ollama for peer query:", result);
     
     // Parse the result to get clean text
@@ -328,12 +326,13 @@ async function handlePeerQuery(conn, message, peerId) {
         }
       }
     } else {
-      // In collaborative mode, just send the final response to the requesting peer
-      // since we've already streamed to all peers during queryLocalLLM
-      console.log(`Sending final response to peer with ID: ${peerId} for requestId: ${requestId}`);
+      // In collaborative mode, we respond to the peer and also broadcast to all other peers
+      console.log(`Sending response to peer with ID: ${peerId} for requestId: ${requestId}`);
       
+      // First, respond to the peer who sent the query
+      // Using the original connection to respond
       conn.write(JSON.stringify({
-        type: 'response',
+        type: 'response', // Use 'response' type for direct responses to queries
         requestId: requestId,
         data: parsedResult,
         isComplete: true,
@@ -341,6 +340,16 @@ async function handlePeerQuery(conn, message, peerId) {
         isPrivate: false,
         fromPeerId: peerId
       }));
+      
+      // Then, broadcast the response to all other peers
+      for (const peerConn of conns) {
+        // Skip the original sender
+        if (peerConn === conn) continue;
+        
+        // Broadcast to other peers using our streamToPeers function
+        // We pass true for isComplete since this is the full response
+        streamToPeers(parsedResult, requestId, true, peerName);
+      }
     }
     
     // Only add the response to our chat history if we're in collaborative mode
@@ -385,7 +394,7 @@ async function handlePeerQuery(conn, message, peerId) {
  * @param {string} prompt - The prompt to send
  * @returns {Promise<string>} A promise that resolves to the response text
  */
-async function queryLocalLLM(model, prompt, requestId, peerName) {
+async function queryLocalLLM(model, prompt) {
   try {
     const baseUrl = getOllamaBaseUrl();
     const url = new URL('/api/generate', baseUrl);
@@ -432,11 +441,6 @@ async function queryLocalLLM(model, prompt, requestId, peerName) {
             
             // Add the response chunk to our full response text
             responseText += responseChunk;
-            
-            // Stream this chunk to peers in collaborative mode
-            if (getCollaborativeMode()) {
-              streamToPeers(responseChunk, requestId, false, peerName);
-            }
           } catch (innerErr) {
             // If a line can't be parsed as JSON, ignore it
             console.log("Couldn't parse line as JSON:", line);
@@ -448,22 +452,12 @@ async function queryLocalLLM(model, prompt, requestId, peerName) {
         const fallbackResponse = parseOllamaResponse(chunk);
         if (fallbackResponse) {
           responseText += fallbackResponse;
-          
-          // Stream the fallback response to peers in collaborative mode
-          if (getCollaborativeMode()) {
-            streamToPeers(fallbackResponse, requestId, false, peerName);
-          }
         }
       }
     }
     
     console.log("Complete response text for peer query:", responseText);
     console.log("Contains thinking tags:", responseText.includes("<think>"));
-    
-    // Send final empty chunk to mark completion
-    if (getCollaborativeMode()) {
-      streamToPeers('', requestId, true, peerName);
-    }
     
     return responseText;
   } catch (error) {

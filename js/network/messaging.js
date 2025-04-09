@@ -337,9 +337,6 @@ function handlePeerMessage(message, peerId) {
   // In private mode, we don't process or display peer messages from other peers
 }
 
-// Keep track of accumulated content for each request
-const accumulatedContent = new Map();
-
 /**
  * Handle an assistant message from a peer
  * @param {Object} message - The assistant message
@@ -348,60 +345,81 @@ const accumulatedContent = new Map();
 function handlePeerAssistantMessage(message, peerId) {
   // Process assistant message from peer
   const isNewMessage = message.isNewMessage === true;
-  const isComplete = message.isComplete === true;
   
   // Keep track of the current request ID we're handling
   const currentRequestId = message.requestId;
-  console.log(`Processing assistant message for requestId: ${currentRequestId}, isNewMessage: ${isNewMessage}, isComplete: ${isComplete}`);
+  console.log(`Processing assistant message for requestId: ${currentRequestId}, isNewMessage: ${isNewMessage}`);
   console.log(`Peer message contains thinking tags:`, message.content.includes("<think>"));
   
-  // Track both raw and formatted content separately
-  const messageContent = {
-    raw: message.rawContent || message.content,
-    formatted: message.content
-  };
+  // Use rawContent if available, otherwise fall back to content
+  const messageContent = message.rawContent || message.content;
   
-  // If this is a new message, initialize the accumulated content
+  // Find the last message with the same requestId
+  const matchingLastMessage = findLastMessageByRequestId(currentRequestId, 'assistant');
+  
+  // Process the message based on whether it's new or appending to existing
   if (isNewMessage) {
-    accumulatedContent.set(currentRequestId, {
-      raw: messageContent.raw,
-      formatted: messageContent.formatted
-    });
-  } else {
-    // Append to existing content
-    const current = accumulatedContent.get(currentRequestId) || { raw: '', formatted: '' };
-    current.raw += messageContent.raw;
-    current.formatted += messageContent.formatted;
-    accumulatedContent.set(currentRequestId, current);
-  }
-  
-  // Only create the message in chat history when complete
-  if (isComplete) {
-    const accumulated = accumulatedContent.get(currentRequestId);
+    // Create a brand new assistant message
+    console.log(`Creating new assistant message from ${message.fromPeer} with requestId: ${currentRequestId}`);
     
-    // Format the raw content for display
-    const formattedContent = formatThinkingContent(accumulated.raw);
+    // Format the content for display
+    const formattedContent = formatThinkingContent(messageContent);
+    console.log(`New peer message thinking content:`, {
+      hasThinkingTags: messageContent.includes("<think>"),
+      hasThinkingHTML: formattedContent.includes("thinking-content")
+    });
     
     // Create a new message in the chat history
     const newAssistantMessage = {
       type: 'assistant',
       content: formattedContent,
-      rawContent: accumulated.raw, // Preserve the original raw content with thinking tags
+      rawContent: messageContent, // Store the raw content with thinking tags
       timestamp: Date.now(),
       fromPeer: message.fromPeer,
       requestId: currentRequestId
     };
     
-    console.log("Creating final assistant message:", {
-      hasThinkingTags: accumulated.raw.includes("<think>"),
-      hasThinkingHTML: formattedContent.includes("thinking-content")
-    });
-    
     // Add to chat history
     addToChatHistory(newAssistantMessage);
+  } else if (matchingLastMessage) {
+    // We found an existing message to append to
+    console.log(`Appending to existing assistant message for requestId: ${currentRequestId}`);
     
-    // Clean up
-    accumulatedContent.delete(currentRequestId);
+    // Get the current raw content and append the new content
+    if (!matchingLastMessage.rawContent) {
+      matchingLastMessage.rawContent = matchingLastMessage.content;
+    }
+    
+    // Add the new content to the raw content
+    matchingLastMessage.rawContent += messageContent;
+    
+    // Update the displayed content with thinking tags properly formatted
+    matchingLastMessage.content = formatThinkingContent(matchingLastMessage.rawContent);
+    
+    console.log(`Updated peer message thinking content:`, {
+      hasThinkingTags: matchingLastMessage.rawContent.includes("<think>"),
+      hasThinkingHTML: matchingLastMessage.content.includes("thinking-content")
+    });
+    
+    // Update display (this will be handled by addToChatHistory)
+    addToChatHistory(matchingLastMessage);
+  } else {
+    // No matching message found, create a new one anyway
+    console.log(`No matching message found for requestId: ${currentRequestId}, creating new`);
+    
+    // Format the content for display
+    const formattedContent = formatThinkingContent(messageContent);
+    
+    const newAssistantMessage = {
+      type: 'assistant',
+      content: formattedContent,
+      rawContent: messageContent,
+      timestamp: Date.now(),
+      fromPeer: message.fromPeer,
+      requestId: currentRequestId
+    };
+    
+    addToChatHistory(newAssistantMessage);
   }
 }
 
@@ -472,58 +490,30 @@ function streamToPeers(content, requestId, isComplete = false, fromPeer = 'Host'
     // Check if this is the first chunk for this request
     const isFirstChunk = !activeStreamingRequests.has(requestId);
     
-    // If first chunk, mark this request as active and initialize accumulated content
+    // If first chunk, mark this request as active
     if (isFirstChunk) {
-      activeStreamingRequests.set(requestId, {
-        content: content,
-        rawContent: content // Track raw content separately
-      });
+      activeStreamingRequests.set(requestId, true);
       console.log(`Starting stream to peers for requestId: ${requestId}`);
-    } else {
-      // Accumulate content
-      const current = activeStreamingRequests.get(requestId);
-      if (current) {
-        current.content += content;
-        current.rawContent += content;
-      }
     }
     
     // If this is the final chunk, remove from active requests
     if (isComplete) {
-      const finalContent = activeStreamingRequests.get(requestId);
       activeStreamingRequests.delete(requestId);
       console.log(`Completing stream to peers for requestId: ${requestId}`);
-      
-      // Format the final content
-      const formattedContent = formatThinkingContent(finalContent.content);
-      
-      // Send final message to all peers
-      for (const conn of conns) {
-        conn.write(JSON.stringify({
-          type: 'peer_message',
-          messageType: 'assistant',
-          content: formattedContent,
-          rawContent: finalContent.rawContent, // Preserve original content with thinking tags
-          fromPeer: fromPeer,
-          requestId: requestId,
-          isComplete: true,
-          isNewMessage: false
-        }));
-      }
-    } else {
-      // Send intermediate chunks to all peers
-      for (const conn of conns) {
-        conn.write(JSON.stringify({
-          type: 'peer_message',
-          messageType: 'assistant',
-          content: content,
-          rawContent: content,
-          fromPeer: fromPeer,
-          requestId: requestId,
-          isComplete: false,
-          isNewMessage: isFirstChunk
-        }));
-      }
+    }
+    
+    // Send to all connected peers
+    for (const conn of conns) {
+      conn.write(JSON.stringify({
+        type: 'peer_message',
+        messageType: 'assistant',
+        content: content,
+        rawContent: content, // Send the original content with thinking tags intact
+        fromPeer: fromPeer,
+        requestId: requestId,
+        isComplete: isComplete,
+        isNewMessage: isFirstChunk
+      }));
     }
   }
 }
