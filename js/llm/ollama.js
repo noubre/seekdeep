@@ -2,7 +2,7 @@
  * LLM Ollama module
  * Contains functions for interacting with the Ollama API
  */
-import { getOllamaBaseUrl, getCurrentModel } from './models.js';
+import { getOllamaBaseUrl } from './models.js';
 import { addToChatHistory } from '../messages/history.js';
 import { 
   generateRequestId, 
@@ -85,13 +85,18 @@ async function ask(model, prompt) {
         removeThinkingMessage(thinkingIndex);
       }
       
-      // Create a temporary thinking message to show progress
-      const thinkingMessage = {
-        type: 'thinking',
-        content: 'Generating response...',
-        requestId: requestId
+      // Create an assistant message that we'll update incrementally
+      const assistantMessage = {
+        type: 'assistant',
+        content: '',
+        rawContent: '',
+        requestId: requestId,
+        fromPeer: 'Host', // Explicitly mark as from host for attribution
+        isComplete: false
       };
-      addToChatHistory(thinkingMessage);
+      
+      // Add the initial empty message to the chat history
+      addToChatHistory(assistantMessage);
       
       while (true) {
         const { done, value } = await reader.read();
@@ -111,9 +116,12 @@ async function ask(model, prompt) {
           // Add the response chunk to our full response text
           responseText += responseChunk;
           
-          // Update the thinking message to show progress
-          thinkingMessage.content = `Generating response... (${Math.round(responseText.length / 10)} tokens)`;
-          updateThinkingMessage(thinkingMessage);
+          // Update our assistant message with the new chunk
+          assistantMessage.rawContent += responseChunk;
+          assistantMessage.content = formatThinkingContent(assistantMessage.rawContent);
+          
+          // Re-add the message to chat history to trigger UI update
+          addToChatHistory(assistantMessage);
           
           // Broadcast our own responses to connected peers in collaborative mode
           if (getCollaborativeMode()) {
@@ -126,40 +134,30 @@ async function ask(model, prompt) {
           if (fallbackResponse) {
             responseText += fallbackResponse;
             
-            // Update the thinking message to show progress
-            thinkingMessage.content = `Generating response... (${Math.round(responseText.length / 10)} tokens)`;
-            updateThinkingMessage(thinkingMessage);
-            
-            if (getCollaborativeMode()) {
-              streamToPeers(fallbackResponse, requestId);
-            }
+          // Update our assistant message with the new chunk
+          assistantMessage.rawContent += fallbackResponse;
+          assistantMessage.content = formatThinkingContent(assistantMessage.rawContent);
+          
+          // Re-add the message to chat history to trigger UI update
+          addToChatHistory(assistantMessage);
+          
+          if (getCollaborativeMode()) {
+            streamToPeers(fallbackResponse, requestId);
+          }
           }
         }
       }
       
-      // Remove the thinking message
-      // Find the last thinking message with this requestId and remove it
-      const finalThinkingIndex = findThinkingMessageIndex(requestId);
-      if (finalThinkingIndex !== -1) {
-        removeThinkingMessage(finalThinkingIndex);
-      }
+      // Mark the message as complete
+      assistantMessage.isComplete = true;
       
-      console.log("Creating final message with content:", responseText);
-      console.log("Contains thinking tags:", responseText.includes("<think>"));
-      
-      const assistantMessage = {
-        type: 'assistant',
-        content: formatThinkingContent(responseText), // Process thinking content
-        rawContent: responseText, // Store raw content with thinking tags
-        requestId: requestId,
-        fromPeer: 'Host', // Explicitly mark as from host for attribution
-        isComplete: true
-      };
-      
-      // Log the processed content
+      // Log the final state
+      console.log("Final message content:", assistantMessage.rawContent);
+      console.log("Contains thinking tags:", assistantMessage.rawContent.includes("<think>"));
       console.log("Processed content:", assistantMessage.content);
       console.log("Contains thinking HTML:", assistantMessage.content.includes("thinking-content"));
       
+      // Re-add the message one last time to ensure final state is rendered
       addToChatHistory(assistantMessage);
       
       // Send the isComplete signal to peers
