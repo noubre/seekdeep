@@ -3,7 +3,7 @@
  * Contains functions for interacting with the Ollama API
  */
 import { getOllamaBaseUrl } from './models.js';
-import { addToChatHistory } from '../messages/history.js';
+import { addToChatHistory, findLastMessageByRequestId } from '../messages/history.js';
 import { 
   generateRequestId, 
   setActiveRequestId, 
@@ -14,6 +14,8 @@ import { isSessionHost, getCollaborativeMode } from '../session/modes.js';
 import { broadcastToPeers, streamToPeers } from '../network/messaging.js';
 import { conns } from '../network/hyperswarm.js';
 import { getPeerDisplayName } from '../session/peers.js';
+import { updateChatDisplay } from '../ui/rendering.js';
+
 
 /**
  * Ask the LLM a question
@@ -98,6 +100,8 @@ async function ask(model, prompt) {
       // Add the initial empty message to the chat history
       addToChatHistory(assistantMessage);
       
+      let lastAssistantMessage = null;
+      
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -120,8 +124,15 @@ async function ask(model, prompt) {
           assistantMessage.rawContent += responseChunk;
           assistantMessage.content = formatThinkingContent(assistantMessage.rawContent);
           
-          // Re-add the message to chat history to trigger UI update
-          addToChatHistory(assistantMessage);
+          // Find the last assistant message with this request ID
+          lastAssistantMessage = findLastMessageByRequestId(requestId, 'assistant');
+          
+          if (lastAssistantMessage) {
+            // Update the existing message
+            lastAssistantMessage.rawContent = assistantMessage.rawContent;
+            lastAssistantMessage.content = assistantMessage.content;
+            updateChatDisplay(); // Trigger UI update
+          }
           
           // Broadcast our own responses to connected peers in collaborative mode
           if (getCollaborativeMode()) {
@@ -134,16 +145,23 @@ async function ask(model, prompt) {
           if (fallbackResponse) {
             responseText += fallbackResponse;
             
-          // Update our assistant message with the new chunk
-          assistantMessage.rawContent += fallbackResponse;
-          assistantMessage.content = formatThinkingContent(assistantMessage.rawContent);
-          
-          // Re-add the message to chat history to trigger UI update
-          addToChatHistory(assistantMessage);
-          
-          if (getCollaborativeMode()) {
-            streamToPeers(fallbackResponse, requestId);
-          }
+            // Update our assistant message with the new chunk
+            assistantMessage.rawContent += fallbackResponse;
+            assistantMessage.content = formatThinkingContent(assistantMessage.rawContent);
+            
+            // Find the last assistant message with this request ID
+            lastAssistantMessage = findLastMessageByRequestId(requestId, 'assistant');
+            
+            if (lastAssistantMessage) {
+              // Update the existing message
+              lastAssistantMessage.rawContent = assistantMessage.rawContent;
+              lastAssistantMessage.content = assistantMessage.content;
+              updateChatDisplay(); // Trigger UI update
+            }
+            
+            if (getCollaborativeMode()) {
+              streamToPeers(fallbackResponse, requestId);
+            }
           }
         }
       }
@@ -157,8 +175,14 @@ async function ask(model, prompt) {
       console.log("Processed content:", assistantMessage.content);
       console.log("Contains thinking HTML:", assistantMessage.content.includes("thinking-content"));
       
-      // Re-add the message one last time to ensure final state is rendered
-      addToChatHistory(assistantMessage);
+      // Find the last assistant message with this request ID
+      lastAssistantMessage = findLastMessageByRequestId(requestId, 'assistant');
+      
+      if (lastAssistantMessage) {
+        // Update the existing message one last time to ensure final state is rendered
+        lastAssistantMessage.isComplete = true;
+        updateChatDisplay(); // Trigger UI update
+      }
       
       // Send the isComplete signal to peers
       if (getCollaborativeMode()) {
@@ -178,13 +202,31 @@ async function ask(model, prompt) {
       // Return the full response for any further processing
       return responseText;
     } else {
-      // If we're not the host, we need to send the query to the host
-      // Find the host connection (the first peer we connected to)
-      const hostConn = conns[0];
-      
-      if (!hostConn) {
-        throw new Error('Not connected to a host');
+      // If we're not the host, we will select random subset of peers to send message to for gossip protocol.
+      // Function to calculate k based on the total number of peers
+
+      function calculateK(n) {
+        if (n <= 1) return n; // Handle edge cases: 0 or 1 peer
+        return Math.max(1, Math.min(n, Math.ceil(Math.log(n + 1) / Math.log(2)))); // Log base 2
       }
+
+      const n = conns.length; // Total number of peers
+      const k = calculateK(n); // Dynamically calculate k
+
+      // Shuffle the array and select the first k peers
+      const shuffled = conns.slice().sort(() => 0.5 - Math.random());
+      const randomConns = shuffled.slice(0, k);
+
+      // Log the result for demonstration
+      console.log(`Total peers: ${n}`);
+      console.log(`Selected k: ${k}`);
+      console.log(`Peers to propagate to: ${randomConns}`);
+
+      // const hostConn = conns[0];
+      
+      // if (!hostConn) {
+      //   throw new Error('Not connected to a host');
+      // }
       
       // Store the requestId as our activeRequestId so we can track responses
       setActiveRequestId(requestId);
@@ -196,17 +238,20 @@ async function ask(model, prompt) {
       });
       console.log(`Setting activeRequestId to: ${requestId} for our peer query`);
       
-      // Send the query to the host
-      hostConn.write(JSON.stringify({
-        type: 'query',
-        model,
-        prompt,
-        requestId,
-        fromPeerId: hostConn.remotePublicKey.toString('hex')
-      }));
+      // Send the query to the random selected conns
+      for (const conn of randomConns) {
+        conn.write(JSON.stringify({
+          type: 'query',
+          model,
+          prompt,
+          requestId,
+          fromPeerId: conn.remotePublicKey.toString('hex')
+        }));
+      }
+
       
       // The response will come back asynchronously via the message handler
-      console.log('Query sent to host, awaiting response');
+      console.log('Query sent to random conns, awaiting eventual response from the host');
       return null;
     }
   } catch (error) {

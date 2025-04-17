@@ -26,8 +26,11 @@ function addToChatHistory(message) {
   chatHistory.push(message);
   
   // Keep chat history at a reasonable size
-  if (chatHistory.length > 100) {
-    chatHistory.shift();
+  const MAX_HISTORY = 100;
+
+  // If over 100 it will only return the latest 100
+  if (chatHistory.length > MAX_HISTORY) {
+    chatHistory = chatHistory.slice(-MAX_HISTORY);
   }
   
   // Update the chat display

@@ -17,6 +17,7 @@ import {
   clearActiveRequestId 
 } from '../messages/history.js';
 import { parseOllamaResponse, formatThinkingContent } from '../messages/formatting.js';
+import { updateChatDisplay } from '../ui/rendering.js';
 
 // Keep track of peer message handlers
 const peerHandlers = new Map();
@@ -199,7 +200,38 @@ function handleQueryMessage(conn, message, peerId) {
       });
     }
   } else {
-    console.warn('Received query message but we are not the host');
+    console.log('Received query message but we are not the host, sending to random peers for propogation');
+
+    function calculateK(n) {
+      if (n <= 1) return n; // Handle edge cases: 0 or 1 peer
+      return Math.max(1, Math.min(n, Math.ceil(Math.log(n + 1) / Math.log(2)))); // Log base 2
+    }
+
+    const n = conns.length; // Total number of peers
+    const k = calculateK(n); // Dynamically calculate k
+
+    // Shuffle the array and select the first k peers
+    const shuffled = conns.slice().sort(() => 0.5 - Math.random());
+    const randomConns = shuffled.slice(0, k);
+
+    // Log the result for demonstration
+    console.log(`Total peers: ${n}`);
+    console.log(`Selected k: ${k}`);
+    console.log(`Peers to propagate to: ${randomConns}`);
+
+    // Send the query to the random selected conns
+    for (const conn of randomConns) {
+      conn.write(JSON.stringify({
+        type: 'query',
+        model,
+        prompt,
+        requestId,
+        fromPeerId: conn.remotePublicKey.toString('hex')
+      }));
+    }
+    
+    // The response will come back asynchronously via the message handler
+    console.log('Query sent to random conns, awaiting eventual response from the host');
   }
 }
 
@@ -269,6 +301,9 @@ function handleResponseMessage(message) {
           hasThinkingTags: lastMessage.rawContent.includes("<think>"),
           hasThinkingHTML: lastMessage.content.includes("thinking-content")
         });
+        
+        // Update display without re-adding to history
+        updateChatDisplay();
       } else {
         // Create a new assistant message
         const formattedContent = formatThinkingContent(responseContent);
@@ -401,8 +436,8 @@ function handlePeerAssistantMessage(message, peerId) {
       hasThinkingHTML: matchingLastMessage.content.includes("thinking-content")
     });
     
-    // Update display (this will be handled by addToChatHistory)
-    addToChatHistory(matchingLastMessage);
+    // Update the existing message in place without re-adding to history
+    updateChatDisplay();
   } else {
     // No matching message found, create a new one anyway
     console.log(`No matching message found for requestId: ${currentRequestId}, creating new`);
@@ -502,18 +537,21 @@ function streamToPeers(content, requestId, isComplete = false, fromPeer = 'Host'
       console.log(`Completing stream to peers for requestId: ${requestId}`);
     }
     
+    // Create the message object
+    const messageObj = {
+      type: 'peer_message',
+      messageType: 'assistant',
+      content: content,
+      rawContent: content, // Send the original content with thinking tags intact
+      fromPeer: fromPeer,
+      requestId: requestId,
+      isComplete: isComplete,
+      isNewMessage: isFirstChunk
+    };
+
     // Send to all connected peers
     for (const conn of conns) {
-      conn.write(JSON.stringify({
-        type: 'peer_message',
-        messageType: 'assistant',
-        content: content,
-        rawContent: content, // Send the original content with thinking tags intact
-        fromPeer: fromPeer,
-        requestId: requestId,
-        isComplete: isComplete,
-        isNewMessage: isFirstChunk
-      }));
+      conn.write(JSON.stringify(messageObj));
     }
   }
 }

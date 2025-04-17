@@ -181,11 +181,14 @@ function updateChatDisplay() {
   let lastMessageContent = null;
   
   const chatHistory = getChatHistory();
-  
+  // console.log(JSON.stringify(chatHistory, null, 2));
+  console.log(`Length of chat history: ${chatHistory.length}`)
+
   for (const message of chatHistory) {
     // Skip duplicate consecutive assistant messages
+    // TODO: Fix this
     if (message.type === 'assistant' && lastMessageType === 'assistant' && message.content === lastMessageContent) {
-      console.log("Skipping duplicate consecutive message in display");
+      console.log(`Skipping duplicate consecutive message in display: ${message.content}`);
       continue;
     }
     
@@ -197,8 +200,12 @@ function updateChatDisplay() {
     lastMessageContent = message.content;
   }
   
-  // Scroll to the bottom
-  chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+  console.log("Before scroll - scrollTop:", chatMessagesEl.scrollTop, "scrollHeight:", chatMessagesEl.scrollHeight);
+  // Scroll to the bottom using requestAnimationFrame
+  requestAnimationFrame(() => {
+    chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+    console.log("After scroll - scrollTop:", chatMessagesEl.scrollTop, "scrollHeight:", chatMessagesEl.scrollHeight);
+  });
 }
 
 /**
