@@ -6,7 +6,7 @@ import { addToChatHistory } from '../messages/history.js';
 import { updateActivePeer, getPeerDisplayName, isPeerHost } from '../session/peers.js';
 import { isSessionHost, getCollaborativeMode } from '../session/modes.js';
 import { updateModelSelect, shareModelsWithPeer } from '../llm/models.js';
-import { handlePeerQuery } from '../llm/ollama.js';
+import { handlePeerQuery } from '../llm/provider.js';
 import { conns } from './hyperswarm.js';
 import { 
   isActiveRequest, 

@@ -11,6 +11,7 @@ let promptArea;
 let topicKeyInput;
 let joinButton;
 let chatModeSelect;
+let providerSelect;
 let modelSelect;
 let refreshModelsButton;
 let currentTopicEl;
@@ -27,6 +28,7 @@ function initializeElements() {
   topicKeyInput = document.getElementById('topic-key');
   joinButton = document.getElementById('join-button');
   chatModeSelect = document.getElementById('chat-mode');
+  providerSelect = document.getElementById('provider-select');
   modelSelect = document.getElementById('model-select');
   refreshModelsButton = document.getElementById('refresh-models');
   currentTopicEl = document.getElementById('current-topic');
@@ -48,6 +50,24 @@ function clearPromptArea() {
  */
 function getPromptValue() {
   return promptArea ? promptArea.value.trim() : '';
+}
+
+/**
+ * Get the selected provider from the provider select dropdown
+ * @returns {string} The ID of the selected provider
+ */
+function getSelectedProvider() {
+  return providerSelect ? providerSelect.value : 'ollama';
+}
+
+/**
+ * Set the selected provider in the provider select dropdown
+ * @param {string} provider - The provider to select
+ */
+function setSelectedProvider(provider) {
+  if (providerSelect) {
+    providerSelect.value = provider;
+  }
 }
 
 /**
@@ -169,6 +189,8 @@ export {
   initializeElements,
   clearPromptArea,
   getPromptValue,
+  getSelectedProvider,
+  setSelectedProvider,
   getSelectedModel,
   isCollaborativeModeSelected,
   setChatModeSelectValue,
@@ -188,6 +210,7 @@ export {
   topicKeyInput,
   joinButton,
   chatModeSelect,
+  providerSelect,
   modelSelect,
   refreshModelsButton,
   currentTopicEl,

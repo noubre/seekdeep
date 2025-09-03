@@ -41,6 +41,15 @@ function getOllamaBaseUrl() {
 }
 
 /**
+ * Get the LM Studio base URL
+ * @returns {string} The LM Studio base URL
+ */
+function getLMStudioBaseUrl() {
+  // LM Studio typically runs on port 1234
+  return 'http://localhost:1234';
+}
+
+/**
  * Fetch available models from Ollama
  * @param {boolean} returnModelsOnly - Whether to only return the models without updating the UI
  * @returns {Promise<Array>} A promise that resolves to the array of models
@@ -278,6 +287,7 @@ export {
   setCurrentModel,
   getCurrentModel,
   getOllamaBaseUrl,
+  getLMStudioBaseUrl,
   isUsingHostModels,
   setUsingHostModels,
   DEFAULT_MODELS

@@ -5,7 +5,8 @@
     "name": "seekdeep",
     "type": "desktop",
     "links": [
-      "http://localhost:11434"
+      "http://localhost:11434",
+      "http://localhost:1234/api/v0/models"
     ],
     "gui": {
       "backgroundColor": "#1F2430",

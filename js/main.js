@@ -9,6 +9,7 @@ import * as hyperswarm from './network/hyperswarm.js';
 // import * as messaging from './network/messaging.js';
 // import * as ollama from './llm/ollama.js';
 import * as models from './llm/models.js';
+import * as provider from './llm/provider.js';
 // import * as history from './messages/history.js';
 // import * as formatting from './messages/formatting.js';
 import * as modes from './session/modes.js';
@@ -34,6 +35,14 @@ function initializeApp() {
   // Update topic display when network state changes
   document.addEventListener('swarmTopicChanged', updateTopic);
   updateTopic(); // Initial update
+  
+  // Initialize LLM provider system
+  provider.autoSelectProvider().then(selectedProvider => {
+    console.log(`Auto-selected provider: ${selectedProvider}`);
+    ui.setSelectedProvider(selectedProvider);
+  }).catch(err => {
+    console.warn('Failed to auto-select provider:', err);
+  });
   
   // Initialize LLM
   models.fetchAvailableModels();

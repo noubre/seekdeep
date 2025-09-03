@@ -8,8 +8,11 @@ import {
   joinButton, 
   topicKeyInput, 
   refreshModelsButton,
+  providerSelect,
   getPromptValue,
   getSelectedModel,
+  getSelectedProvider,
+  setSelectedProvider,
   clearPromptArea,
   getTopicKeyValue,
   clearTopicKeyInput,
@@ -20,7 +23,7 @@ import { addToChatHistory } from '../messages/history.js';
 import { joinExistingChat } from '../network/hyperswarm.js';
 import { isSessionHost } from '../session/modes.js';
 import { fetchAvailableModels, requestModelsFromHost } from '../llm/models.js';
-import { ask } from '../llm/ollama.js';
+import { ask, setCurrentProvider } from '../llm/provider.js';
 
 /**
  * Set up all event listeners for the UI
@@ -47,6 +50,11 @@ function setupEventListeners() {
   }
   
   // Chat mode selector has been removed - no longer needed
+  
+  // Provider selection change handler
+  if (providerSelect) {
+    providerSelect.addEventListener('change', handleProviderChange);
+  }
   
   // Refresh models button click handler
   if (refreshModelsButton) {
@@ -130,6 +138,43 @@ function handleTopicKeyInputKeydown(event) {
 
 
 /**
+ * Handle provider selection change
+ */
+function handleProviderChange() {
+  const selectedProvider = getSelectedProvider();
+  console.log(`Provider changed to: ${selectedProvider}`);
+  
+  // Update the provider in the provider abstraction layer
+  setCurrentProvider(selectedProvider);
+  
+  // Show a system message about the provider change
+  addToChatHistory({
+    type: 'system',
+    content: `Switched to ${selectedProvider === 'ollama' ? 'Ollama' : 'LM Studio'} provider`
+  });
+  
+  // Refresh models for the new provider
+  setRefreshModelsLoading(true);
+  
+  fetchAvailableModels()
+    .then(() => {
+      addToChatHistory({
+        type: 'system',
+        content: `Loaded models from ${selectedProvider === 'ollama' ? 'Ollama' : 'LM Studio'}`
+      });
+    })
+    .catch(error => {
+      addToChatHistory({
+        type: 'system',
+        content: `Error loading models from ${selectedProvider === 'ollama' ? 'Ollama' : 'LM Studio'}: ${error.message}`
+      });
+    })
+    .finally(() => {
+      setRefreshModelsLoading(false);
+    });
+}
+
+/**
  * Handle refresh models button click
  */
 function handleRefreshModelsClick() {
@@ -179,5 +224,6 @@ export {
   handlePromptKeydown,
   handleJoinButtonClick,
   handleTopicKeyInputKeydown,
+  handleProviderChange,
   handleRefreshModelsClick
 };

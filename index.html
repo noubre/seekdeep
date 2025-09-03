@@ -238,7 +238,7 @@
       display: inline-block;
     }
     
-    #model-select {
+    #provider-select, #model-select {
       background-color: #2E3440;
       color: #fff;
       border: 1px solid #434C5E;
@@ -256,7 +256,7 @@
       cursor: pointer;
     }
     
-    #model-select:focus {
+    #provider-select:focus, #model-select:focus {
       outline: none;
       border-color: #5E81AC;
       box-shadow: 0 0 0 2px rgba(136, 192, 208, 0.3);
@@ -633,6 +633,11 @@
   
   <form>
     <div class="model-control">
+      <label for="provider-select">Provider:</label>
+      <select id="provider-select" name="provider">
+        <option value="ollama">Ollama</option>
+        <option value="lmstudio">LM Studio</option>
+      </select>
       <label for="model-select">Model:</label>
       <select id="model-select" name="model">
         <option value="deepseek-r1:1.5b">DeepSeek 1.5b</option>
