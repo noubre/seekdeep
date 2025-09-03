@@ -1,17 +1,18 @@
 # SeekDeep
 
-A P2P-enabled desktop application that interfaces with local LLMs (Ollama) using Pear Runtime, Hyperswarm, and Hypercore technologies.
-
-This is a work in progress and under development.
+A P2P-enabled desktop application that interfaces with multiple local LLM providers (Ollama and LM Studio) using Pear Runtime, Hyperswarm, and Hypercore technologies. Built with a modern modular ES6 architecture for maintainability and extensibility.
 
 ## Key Features
 
+- **Multi-Provider LLM Support**: Seamless integration with Ollama and LM Studio
+- **Provider Auto-Detection**: Automatic discovery and selection of available LLM providers
 - **P2P Networking**: Decentralized connections via Hyperswarm without central servers
-- **LLM Integration**: Direct interface with Ollama for local LLM access
+- **Modular Architecture**: Clean ES6 module system with separation of concerns
 - **Dual Chat Modes**: 
   - Collaborative mode where all peers see all messages
-  - Individual mode where each peer has a separate conversation
-- **Model Sharing**: Host shares available models with connected peers
+  - Private mode where each peer has a separate conversation
+- **Model Sharing**: Host shares available models from active provider with connected peers
+- **Provider Switching**: Runtime switching between different LLM providers
 - **Markdown Rendering**: Rich formatting of LLM responses
 - **Thinking Content Display**: Visibility into the LLM's reasoning process if available
 - **Response Streaming**: Real-time display of LLM responses as they're generated
@@ -33,12 +34,27 @@ Before running SeekDeep, make sure you have:
 
 1. **Node.js** (v18 or later) and **npm** installed
 2. **Pear Runtime** installed (from [Pears.com](https://pears.com)) or just run:
+   ```bash
+   npx pear
+   ```
+3. **At least one LLM provider** installed and running:
+
+### Option A: Ollama (Recommended)
+- Download from [ollama.ai](https://ollama.ai)
+- Install and run a model:
   ```bash
-  npx pear
+  ollama pull deepseek-r1:1.5b
+  ollama serve  # Runs on port 11434
   ```
-3. **Ollama** installed and running with at least one model
-   - Download from [ollama.ai](https://ollama.ai)
-   - Run: `ollama pull deepseek-r1:1.5b` (or another model of your choice)
+
+### Option B: LM Studio
+- Download from [lmstudio.ai](https://lmstudio.ai)
+- Install and load a model
+- Start the local server (typically runs on port 1234)
+
+### Option C: Both Providers
+- Install both Ollama and LM Studio for maximum flexibility
+- SeekDeep will auto-detect available providers and allow switching between them
 
 ## Installation if not running through Pear seeding
 
@@ -57,25 +73,39 @@ Before running SeekDeep, make sure you have:
 
 ### Running the Desktop App
 
-1. Make sure Ollama is running with your chosen model.
-  ```bash
-  ollama ps
+1. **Start your LLM provider(s):**
 
-  ```
+   **For Ollama:**
+   ```bash
+   ollama serve
+   ollama ps  # Check running models
+   ```
 
-2. Launch the app in development mode:
+   **For LM Studio:**
+   - Open LM Studio
+   - Load a model
+   - Start the local server (usually on port 1234)
+
+2. **Launch the app in development mode:**
    ```bash
    cd seekdeep
    pear run --dev .
    
-   // Or:
+   # Or:
    pear run --dev path/to/seekdeep
-
    ```
 
-3. The app window will open, and you can start entering prompts in the text area and clicking "Seek" (or pressing Ctrl+Enter) to get responses.
+3. **Using the app:**
+   - The app window will open and auto-detect available providers
+   - Select your preferred provider from the dropdown (if multiple are available)
+   - Choose a model from the model dropdown
+   - Start entering prompts in the text area and click "Seek" (or press Ctrl+Enter)
+   - The app will automatically discover and connect to peers on the P2P network using Hyperswarm
 
-4. The app will automatically discover and connect to peers on the P2P network using Hyperswarm.
+4. **Provider Features:**
+   - **Auto-Detection**: The app automatically detects which providers are running
+   - **Provider Switching**: Switch between Ollama and LM Studio at runtime
+   - **Model Sync**: When connected to peers, model lists sync from the host's active provider
 
 ### Running the Desktop App through Pear seeding
 
@@ -98,108 +128,172 @@ When you start the app, it automatically runs in host mode until you join an exi
 
 ### Running the Server
 
-The server component makes your local Ollama instance accessible over P2P:
+The server component makes your local LLM providers accessible over P2P:
 
-1. Make sure Ollama is running with your desired model:
+1. **Make sure at least one LLM provider is running:**
+
+   **For Ollama:**
    ```bash
+   ollama serve
    ollama run deepseek-r1:1.5b
    ```
 
-2. Start the server:
+   **For LM Studio:**
+   - Start LM Studio with a loaded model and local server enabled
+
+2. **Start the server:**
    ```bash
    node server.js
    ```
 
-3. Note the public key displayed in the terminal – this is your server's unique identifier on the P2P network.
+3. **Server Features:**
+   - Auto-detects available providers (Ollama and/or LM Studio)
+   - Proxies requests to the appropriate provider
+   - Displays the public key for P2P identification
+   - Supports switching between providers if multiple are available
 
 > **Note**: The server app is optional and only needed when you want to connect to a remote machine where you can't run the desktop app directly. The desktop app can act as both a client and server/host without requiring the separate server component.
 
 
-### Model Selection
+### Provider and Model Selection
 
-SeekDeep now supports switching between different LLM models:
+SeekDeep supports multiple LLM providers and models:
 
-1. A model selector dropdown is available in the chat interface.
-2. By default, SeekDeep will fetch the list of available models from your local Ollama installation, or if connected to a host then the host's models will be listed.
-3. If you don't have specific models installed, you can install them with Ollama:
-   ```bash
-   # Install additional models
-   ollama pull llama2:7b
-   ollama pull mistral:7b
-   ollama pull phi:2.7b
-   ollama pull gemma:7b
-   ```
-4. The model selection is used for all subsequent queries until changed.
-5. Each peer can choose to interact with a different model from the host.
+#### Provider Selection
+1. **Provider Dropdown**: Available in the chat interface when multiple providers are detected
+2. **Auto-Detection**: SeekDeep automatically detects running providers (Ollama, LM Studio)
+3. **Runtime Switching**: Switch between providers without restarting the application
+4. **Status Indicators**: Visual indicators show provider availability and connection status
 
-### Model Sharing Between Host and Peers
+#### Model Selection
+1. **Model Dropdown**: Shows models available from the currently selected provider
+2. **Provider-Specific Models**: Model list updates when switching providers
+3. **Host Synchronization**: When connected to a host, peers see the host's provider and models
+4. **Refresh Capability**: Refresh button updates the model list from the active provider
+
+#### Installing Additional Models
+
+**For Ollama:**
+```bash
+# Install additional models
+ollama pull llama2:7b
+ollama pull mistral:7b
+ollama pull phi:2.7b
+ollama pull gemma:7b
+ollama pull deepseek-coder:6.7b
+```
+
+**For LM Studio:**
+- Use the LM Studio interface to download and manage models
+- Models appear automatically in SeekDeep when loaded in LM Studio
+
+#### Usage Notes
+- Model selection applies to all subsequent queries until changed
+- Each peer can interact with different models from the host's active provider
+- Provider switching affects the entire session for the host and all connected peers
+
+### Provider and Model Sharing Between Host and Peers
 
 When using SeekDeep in a peer-to-peer setup:
 
-1. **Host Models**: The host's available Ollama models are automatically shared with connected peers during the connection handshake.
-2. **Peer UI**: Connected peers will see the host's models in their model dropdown instead of their local models.
-3. **Model Refresh**: Peers can click the refresh button next to the model dropdown to request the latest models from the host.
-4. **No Local Models**: When connected to a host, peers will not fetch or use their local Ollama models, ensuring consistency across the session.
-5. **Visual Indication**: A system message informs peers when they're using models from the host.
+1. **Host Provider Sharing**: The host's active provider and available models are automatically shared with connected peers during the connection handshake.
 
-This ensures that all peers have access to the same models available on the host machine, regardless of what models they have installed locally.
+2. **Peer Synchronization**: Connected peers will see:
+   - The host's active provider in their provider dropdown
+   - The host's available models in their model dropdown
+   - Provider status and connection information
+
+3. **Dynamic Updates**: When the host switches providers:
+   - All peers are notified of the provider change
+   - Model lists are automatically updated across all peers
+   - Ongoing conversations continue seamlessly
+
+4. **Model Refresh**: Peers can click the refresh button to request the latest models from the host's active provider.
+
+5. **Provider Consistency**: When connected to a host, peers use the host's provider and models, ensuring consistency across the session regardless of what providers/models peers have installed locally.
+
+6. **Visual Indicators**: System messages inform peers about:
+   - Which provider they're using (host's provider)
+   - When the host switches providers
+   - Model availability and updates
+
+This ensures that all peers have access to the same provider and models available on the host machine, creating a unified collaborative experience.
 
 ### Collaboration Modes
 
 SeekDeep offers two collaboration modes when interacting with peers:
 
-- **Collaborative Mode**: When a peer sends a query to the host's LLM, both the message and response are visible to everyone in the chat. All peers see all conversations.
-- **Individual Mode (Default)**: When a peer sends a query, the message and response are only visible to that peer, keeping each user's conversations separate. Note that this is not "private", because the host has access to the logs from Ollama and can see what queries are sent.
+- **Collaborative Mode**: When a peer sends a query to the host's LLM provider, both the message and response are visible to everyone in the chat. All peers see all conversations and can observe the collaborative problem-solving process.
 
-Only the host can switch between modes using the dropdown in the UI. When a host changes the mode, all connected peers' chat modes are updated automatically. For security and consistency, all peers start in individual mode by default, and mode updates are only accepted from the host or server - not from other peers.
+- **Private Mode (Default)**: When a peer sends a query, the message and response are only visible to that peer, keeping each user's conversations separate. Note that this is not truly "private" since the host processes all queries and has access to provider logs.
+
+#### Mode Management
+- **Host Control**: Only the host can switch between modes using the dropdown in the UI
+- **Automatic Synchronization**: When a host changes the mode, all connected peers' chat modes are updated automatically
+- **Security**: For consistency and security, mode updates are only accepted from the host or server - not from other peers
+- **Default Behavior**: All sessions start in private mode by default
+- **Provider Independence**: Mode settings work consistently across all supported providers (Ollama, LM Studio)
+
+The collaboration mode affects how queries and responses are shared, but the underlying provider and model selection remain consistent across all peers in the session.
 
 ## Project Structure
 
-The SeekDeep project is organized into a modular structure with clear separation of concerns:
+SeekDeep is built with a modern modular ES6 architecture for maintainability and extensibility:
 
 ```
 seekdeep/
-├── app.js                 # Main desktop application logic
+├── js/                    # Modular JavaScript architecture
+│   ├── main.js            # Main application bootstrap
+│   ├── ui/                # User interface modules
+│   │   ├── elements.js    # DOM element management
+│   │   ├── events.js      # Event handling
+│   │   └── rendering.js   # Display rendering
+│   ├── llm/               # LLM provider modules
+│   │   ├── provider.js    # Provider abstraction layer
+│   │   ├── ollama.js      # Ollama integration
+│   │   ├── lmstudio.js    # LM Studio integration
+│   │   └── models.js      # Model management
+│   ├── network/           # P2P networking modules
+│   │   ├── hyperswarm.js  # P2P connection management
+│   │   └── messaging.js   # Message protocol
+│   ├── session/           # Session management modules
+│   │   ├── modes.js       # Chat mode management
+│   │   └── peers.js       # Peer state management
+│   └── messages/          # Message handling modules
+│       ├── formatting.js  # Message formatting
+│       └── history.js     # Chat history
 ├── index.html             # Main UI structure and styling
 ├── server.js              # Optional standalone server component
 ├── package.json           # Project configuration and dependencies
-├── js/                    # JavaScript modules
-│   ├── main.js            # Main application entry point
-│   ├── llm/               # LLM integration
-│   │   ├── models.js      # Model management
-│   │   └── ollama.js      # Ollama API integration
-│   ├── messages/          # Message handling
-│   │   ├── formatting.js  # Message formatting utilities
-│   │   └── history.js     # Chat history management
-│   ├── network/           # Networking components
-│   │   ├── hyperswarm.js  # P2P networking
-│   │   └── messaging.js   # Message protocol implementation
-│   ├── session/           # Session management
-│   │   ├── modes.js       # Chat mode management
-│   │   └── peers.js       # Peer connection handling
-│   └── ui/                # User interface components
-│       ├── elements.js    # UI element creation
-│       ├── events.js      # Event handlers
-│       └── rendering.js   # Display rendering
 ├── lib/                   # External libraries
 │   └── marked.min.js      # Markdown parser
 ├── memory-bank/           # Project documentation
-│   ├── activeContext.md   # Current work focus
-│   ├── productContext.md  # Product context and goals
+│   ├── activeContext.md   # Current development context
+│   ├── productContext.md  # Product goals and context
 │   ├── progress.md        # Implementation progress
 │   ├── projectbrief.md    # Project overview
-│   ├── systemPatterns.md  # System architecture
+│   ├── systemPatterns.md  # Architecture patterns
 │   └── techContext.md     # Technical details
 ├── test/                  # Test files
-│   ├── app.test.js        # Unit tests for app.js
-│   ├── server.test.js     # Unit tests for server.js
+│   ├── app.test.js        # Unit tests for core app
+│   ├── server.test.js     # Unit tests for server
 │   ├── integration.test.js # Integration tests
 │   ├── e2e.test.js        # End-to-end tests
-│   └── setupTests.js      # Test configuration
+│   ├── simple.test.js     # Simple test scenarios
+│   └── direct.test.js     # Direct API tests
 └── screenshots/           # Application screenshots
     ├── desktop.jpeg       # Desktop UI screenshot
     └── server.jpeg        # Server UI screenshot
 ```
+
+### Architecture Benefits
+
+- **Modular Design**: Each module has a focused responsibility and clear boundaries
+- **ES6 Modules**: Modern import/export system for clean dependencies
+- **Provider Abstraction**: Easy to add new LLM providers without changing core logic
+- **Separation of Concerns**: UI, networking, LLM integration, and session management are isolated
+- **Testability**: Modular structure enables targeted unit and integration testing
+- **Maintainability**: Clear organization makes the codebase easy to understand and modify
 
 ## Scalability
 
@@ -470,4 +564,3 @@ Below are examples of the actual JSON message structures used in the P2P communi
   }
 }
 ```
-
