@@ -131,7 +131,7 @@ function parseOllamaResponse(text) {
         try {
           const json = JSON.parse(line);
           // If we have a valid Ollama response with a text field, use it
-          if (json && typeof json.response === 'string') {
+          if (json && typeof json.response === 'string' && json.response.trim() !== '') {
             lastValidResponse = json.response;
           }
         } catch (innerErr) {

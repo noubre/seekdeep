@@ -41,28 +41,8 @@ function createMessageElement(message) {
     case 'user': {
       messageEl.classList.add('user-message');
       
-      let sender = 'You';
-      if (message.fromPeer) {
-        sender = message.fromPeer;
-        if (sender !== 'Host' && sender !== 'You') {
-          messageEl.classList.add('peer-message');
-          
-          // Find the peer color class
-          const activePeers = getActivePeers();
-          for (const [peerId, peerInfo] of activePeers.entries()) {
-            if (peerInfo.displayName === sender) {
-              const colorIndex = PEER_COLORS.indexOf(peerInfo.color);
-              if (colorIndex >= 0) {
-                messageEl.classList.add(`peer-color-${colorIndex + 1}`);
-              }
-              // Store peer info for response attribution
-              messageEl.dataset.peerName = sender;
-              messageEl.dataset.peerColor = peerInfo.color;
-              break;
-            }
-          }
-        }
-      }
+      // In private mode, all user messages are from "You"
+      const sender = 'You';
       
       // Create header
       const userHeader = document.createElement('div');
@@ -81,22 +61,6 @@ function createMessageElement(message) {
     case 'assistant': {
       messageEl.classList.add('assistant-message');
       
-      // Find which user message this is responding to
-      let respondingTo = null;
-      let respondingColor = null;
-      
-      // Try to find the matching request ID in chat history
-      if (message.requestId) {
-        const chatHistory = getChatHistory();
-        for (let i = chatHistory.length - 1; i >= 0; i--) {
-          const historyMsg = chatHistory[i];
-          if (historyMsg.type === 'user' && historyMsg.requestId === message.requestId) {
-            respondingTo = historyMsg.fromPeer || 'You';
-            break;
-          }
-        }
-      }
-      
       // Create header
       const assistantHeader = document.createElement('div');
       assistantHeader.classList.add('message-header');
@@ -104,29 +68,6 @@ function createMessageElement(message) {
       // Get model name from the current model
       const modelName = message.modelName || 'AI Assistant';
       assistantHeader.textContent = modelName;
-      
-      // Add responding-to attribution if available
-      if (respondingTo) {
-        const respondingEl = document.createElement('span');
-        respondingEl.classList.add('responding-to');
-        respondingEl.textContent = `to ${respondingTo}`;
-        
-        // Add color dot if we have a peer color
-        if (respondingTo !== 'You' && respondingTo !== 'Host') {
-          const activePeers = getActivePeers();
-          for (const [peerId, peerInfo] of activePeers.entries()) {
-            if (peerInfo.displayName === respondingTo) {
-              const colorDot = document.createElement('span');
-              colorDot.classList.add('color-dot');
-              colorDot.style.backgroundColor = peerInfo.color;
-              respondingEl.prepend(colorDot);
-              break;
-            }
-          }
-        }
-        
-        assistantHeader.appendChild(respondingEl);
-      }
       
       messageEl.appendChild(assistantHeader);
       

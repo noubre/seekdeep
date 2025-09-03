@@ -62,17 +62,43 @@ The SeekDeep project is a P2P-enabled desktop application that interfaces with l
 4. **Mobile Support**: Evaluating feasibility of extending to mobile platforms
 
 ## Recent Changes
-- Enhanced message protocol with improved validation for mode updates
-- Optimized streaming response handling for better performance
-- Improved error handling for network and API failures
+- Enhanced message protocol with improved validation for mode updates:
+  - Added source verification for mode change messages
+  - Implemented request ID tracking for mode update acknowledgments
+  - Added validation checks for message integrity and authenticity
+- Optimized streaming response handling for better performance:
+  - Reduced message overhead in streaming chunks
+  - Improved buffer management for long responses
+  - Enhanced error recovery during stream interruptions
+- Improved error handling for network and API failures:
+  - Added automatic retry logic for failed API calls
+  - Implemented graceful degradation for network issues
+  - Enhanced error reporting with detailed status messages
 - Updated documentation with detailed message protocol examples
 - Added visual indicators for peer attribution in messages
 - Implemented proper handling of thinking content in streamed responses
 
-## Next Steps
-1. Complete test suite implementation for core functionality
-2. Address critical known issues, particularly around connection stability
-3. Optimize performance for larger peer groups
-4. Implement basic persistence mechanisms for chat history
-5. Explore authentication options for more secure sessions
-6. Enhance error recovery for network interruptions
+## Next Steps (Prioritized)
+1. Testing Improvements (Critical)
+   - Complete unit tests for message protocol validation
+   - Implement integration tests for P2P communication
+   - Add end-to-end tests for chat modes and model sharing
+   - Achieve 80%+ test coverage for core components
+
+2. Stability Enhancements (High Priority)
+   - Implement robust connection recovery mechanisms
+   - Add automatic reconnection for dropped peers
+   - Enhance error handling for API timeouts
+   - Improve validation for all P2P messages
+
+3. Performance Optimization (Medium Priority)
+   - Optimize message batching for large peer groups
+   - Implement efficient chat history management
+   - Enhance UI rendering for long sessions
+   - Add performance monitoring metrics
+
+4. Feature Development (Lower Priority)
+   - Basic chat history persistence
+   - Simple peer authentication mechanism
+   - Offline mode capabilities
+   - Enhanced error recovery systems

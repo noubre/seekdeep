@@ -7,7 +7,6 @@ import {
   promptArea, 
   joinButton, 
   topicKeyInput, 
-  chatModeSelect, 
   refreshModelsButton,
   getPromptValue,
   getSelectedModel,
@@ -19,7 +18,7 @@ import {
 } from './elements.js';
 import { addToChatHistory } from '../messages/history.js';
 import { joinExistingChat } from '../network/hyperswarm.js';
-import { setChatMode, isSessionHost } from '../session/modes.js';
+import { isSessionHost } from '../session/modes.js';
 import { fetchAvailableModels, requestModelsFromHost } from '../llm/models.js';
 import { ask } from '../llm/ollama.js';
 
@@ -47,10 +46,7 @@ function setupEventListeners() {
     topicKeyInput.addEventListener('keydown', handleTopicKeyInputKeydown);
   }
   
-  // Chat mode select change handler
-  if (chatModeSelect) {
-    chatModeSelect.addEventListener('change', handleChatModeChange);
-  }
+  // Chat mode selector has been removed - no longer needed
   
   // Refresh models button click handler
   if (refreshModelsButton) {
@@ -132,13 +128,6 @@ function handleTopicKeyInputKeydown(event) {
   }
 }
 
-/**
- * Handle chat mode select change
- */
-function handleChatModeChange() {
-  const newMode = chatModeSelect.value === 'collaborative';
-  setChatMode(newMode);
-}
 
 /**
  * Handle refresh models button click
@@ -190,6 +179,5 @@ export {
   handlePromptKeydown,
   handleJoinButtonClick,
   handleTopicKeyInputKeydown,
-  handleChatModeChange,
   handleRefreshModelsClick
 };

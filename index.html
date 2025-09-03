@@ -160,38 +160,6 @@
       font-size: 0.9em;
     }
     
-    .peer-message {
-      align-self: flex-start;
-      border-bottom-left-radius: 0;
-    }
-    
-    /* Peer color classes - will be assigned dynamically */
-    .peer-color-1 { background-color: #5E81AC; border-left: 3px solid #88C0D0; }
-    .peer-color-2 { background-color: #8FBCBB; border-left: 3px solid #A3BE8C; }
-    .peer-color-3 { background-color: #B48EAD; border-left: 3px solid #D08770; }
-    .peer-color-4 { background-color: #BF616A; border-left: 3px solid #EBCB8B; }
-    .peer-color-5 { background-color: #A3BE8C; border-left: 3px solid #5E81AC; }
-    
-    /* Response attribution indicator */
-    .response-to {
-      font-size: 0.7em;
-      color: #a0a8bd;
-      background-color: rgba(0, 0, 0, 0.2);
-      padding: 2px 6px;
-      border-radius: 10px;
-      margin-left: 8px;
-      white-space: nowrap;
-      display: inline-flex;
-      align-items: center;
-    }
-    
-    .response-to .color-dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      margin-right: 4px;
-      display: inline-block;
-    }
     
     .message-header {
       font-weight: bold;
@@ -647,15 +615,6 @@
       </div>
     </div>
     
-    <div class="join-section-row">
-      <label for="chat-mode">Chat Mode:</label>
-      <div class="mode-toggle">
-        <select id="chat-mode">
-          <option value="collaborative">Collaborative (Shared Chat)</option>
-          <option value="private" selected>Private (Separate Chats)</option>
-        </select>
-      </div>
-    </div>
   </div>
   
   <!-- Chat container with active users and messages -->

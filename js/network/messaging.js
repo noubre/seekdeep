@@ -4,7 +4,6 @@
  */
 import { addToChatHistory } from '../messages/history.js';
 import { updateActivePeer, getPeerDisplayName, isPeerHost } from '../session/peers.js';
-import { handleModeUpdateMessage } from '../session/modes.js';
 import { isSessionHost, getCollaborativeMode } from '../session/modes.js';
 import { updateModelSelect, shareModelsWithPeer } from '../llm/models.js';
 import { handlePeerQuery } from '../llm/ollama.js';
@@ -47,7 +46,8 @@ function setupPeerMessageHandler(conn, peerId) {
         break;
         
       case 'mode_update':
-        handleModeUpdateMessage(message, peerId, isPeerHost(peerId, conns));
+        // Mode updates are no longer needed since we're always in private mode
+        console.log('Ignoring mode update message - always in private mode');
         break;
         
       case 'models_update':
@@ -67,7 +67,8 @@ function setupPeerMessageHandler(conn, peerId) {
         break;
         
       case 'peer_message':
-        handlePeerMessage(message, peerId);
+        // Peer messages are no longer processed since we're always in private mode
+        console.log('Ignoring peer message - always in private mode');
         break;
         
       default:
@@ -294,12 +295,15 @@ function handleResponseMessage(message) {
       const lastMessage = findLastMessageByRequestId(message.requestId, 'assistant');
       if (lastMessage) {
         // Update existing message instead of creating a new one
-        lastMessage.content = formatThinkingContent(lastMessage.content + responseContent);
-        lastMessage.rawContent = (lastMessage.rawContent || lastMessage.content) + responseContent;
+        // Properly maintain rawContent and format content from the complete raw content
+        lastMessage.rawContent = (lastMessage.rawContent || '') + responseContent;
+        lastMessage.content = formatThinkingContent(lastMessage.rawContent);
         
         console.log("Updated existing message with thinking content:", {
           hasThinkingTags: lastMessage.rawContent.includes("<think>"),
-          hasThinkingHTML: lastMessage.content.includes("thinking-content")
+          hasThinkingHTML: lastMessage.content.includes("thinking-content"),
+          rawContentLength: lastMessage.rawContent.length,
+          contentLength: lastMessage.content.length
         });
         
         // Update display without re-adding to history
@@ -330,7 +334,7 @@ function handleResponseMessage(message) {
     // If this is the last message, clean up request tracking
     if (message.isComplete) {
       if (message.requestId) {
-        console.log(`Removing requestId ${message.requestId} from active requests`);
+        console.log(`Removing requestId ${message.requestId} from active requests - isComplete`);
         removeActiveRequest(message.requestId);
       }
       if (message.requestId === getActiveRequestId()) {
@@ -342,121 +346,6 @@ function handleResponseMessage(message) {
   }
 }
 
-/**
- * Handle a peer message
- * @param {Object} message - The peer message
- * @param {string} peerId - The ID of the peer
- */
-function handlePeerMessage(message, peerId) {
-  // Handle messages from peers (queries and responses)
-  if (getCollaborativeMode()) {
-    // In collaborative mode, show all peer messages
-    switch (message.messageType) {
-      case 'user':
-        // Add the peer's query to chat history
-        const peerName = getPeerDisplayName(peerId);
-        addToChatHistory({
-          type: 'user',
-          content: message.content,
-          fromPeer: message.fromPeer || peerName,
-          peerId: peerId,
-          requestId: message.requestId
-        });
-        break;
-        
-      case 'assistant':
-        handlePeerAssistantMessage(message, peerId);
-        break;
-    }
-  }
-  // In private mode, we don't process or display peer messages from other peers
-}
-
-/**
- * Handle an assistant message from a peer
- * @param {Object} message - The assistant message
- * @param {string} peerId - The ID of the peer
- */
-function handlePeerAssistantMessage(message, peerId) {
-  // Process assistant message from peer
-  const isNewMessage = message.isNewMessage === true;
-  
-  // Keep track of the current request ID we're handling
-  const currentRequestId = message.requestId;
-  console.log(`Processing assistant message for requestId: ${currentRequestId}, isNewMessage: ${isNewMessage}`);
-  console.log(`Peer message contains thinking tags:`, message.content.includes("<think>"));
-  
-  // Use rawContent if available, otherwise fall back to content
-  const messageContent = message.rawContent || message.content;
-  
-  // Find the last message with the same requestId
-  const matchingLastMessage = findLastMessageByRequestId(currentRequestId, 'assistant');
-  
-  // Process the message based on whether it's new or appending to existing
-  if (isNewMessage) {
-    // Create a brand new assistant message
-    console.log(`Creating new assistant message from ${message.fromPeer} with requestId: ${currentRequestId}`);
-    
-    // Format the content for display
-    const formattedContent = formatThinkingContent(messageContent);
-    console.log(`New peer message thinking content:`, {
-      hasThinkingTags: messageContent.includes("<think>"),
-      hasThinkingHTML: formattedContent.includes("thinking-content")
-    });
-    
-    // Create a new message in the chat history
-    const newAssistantMessage = {
-      type: 'assistant',
-      content: formattedContent,
-      rawContent: messageContent, // Store the raw content with thinking tags
-      timestamp: Date.now(),
-      fromPeer: message.fromPeer,
-      requestId: currentRequestId
-    };
-    
-    // Add to chat history
-    addToChatHistory(newAssistantMessage);
-  } else if (matchingLastMessage) {
-    // We found an existing message to append to
-    console.log(`Appending to existing assistant message for requestId: ${currentRequestId}`);
-    
-    // Get the current raw content and append the new content
-    if (!matchingLastMessage.rawContent) {
-      matchingLastMessage.rawContent = matchingLastMessage.content;
-    }
-    
-    // Add the new content to the raw content
-    matchingLastMessage.rawContent += messageContent;
-    
-    // Update the displayed content with thinking tags properly formatted
-    matchingLastMessage.content = formatThinkingContent(matchingLastMessage.rawContent);
-    
-    console.log(`Updated peer message thinking content:`, {
-      hasThinkingTags: matchingLastMessage.rawContent.includes("<think>"),
-      hasThinkingHTML: matchingLastMessage.content.includes("thinking-content")
-    });
-    
-    // Update the existing message in place without re-adding to history
-    updateChatDisplay();
-  } else {
-    // No matching message found, create a new one anyway
-    console.log(`No matching message found for requestId: ${currentRequestId}, creating new`);
-    
-    // Format the content for display
-    const formattedContent = formatThinkingContent(messageContent);
-    
-    const newAssistantMessage = {
-      type: 'assistant',
-      content: formattedContent,
-      rawContent: messageContent,
-      timestamp: Date.now(),
-      fromPeer: message.fromPeer,
-      requestId: currentRequestId
-    };
-    
-    addToChatHistory(newAssistantMessage);
-  }
-}
 
 /**
  * Broadcast a message to all peers
@@ -513,53 +402,9 @@ function broadcastToPeers(message, targetPeerId = null, excludePeerId = null, fo
   return sentCount;
 }
 
-/**
- * Stream content to peers
- * @param {string} content - The content to stream
- * @param {string} requestId - The request ID
- * @param {boolean} isComplete - Whether this is the final chunk
- * @param {string} fromPeer - The peer the content is from
- */
-function streamToPeers(content, requestId, isComplete = false, fromPeer = 'Host') {
-  if (getCollaborativeMode() && conns.length > 0) {
-    // Check if this is the first chunk for this request
-    const isFirstChunk = !activeStreamingRequests.has(requestId);
-    
-    // If first chunk, mark this request as active
-    if (isFirstChunk) {
-      activeStreamingRequests.set(requestId, true);
-      console.log(`Starting stream to peers for requestId: ${requestId}`);
-    }
-    
-    // If this is the final chunk, remove from active requests
-    if (isComplete) {
-      activeStreamingRequests.delete(requestId);
-      console.log(`Completing stream to peers for requestId: ${requestId}`);
-    }
-    
-    // Create the message object
-    const messageObj = {
-      type: 'peer_message',
-      messageType: 'assistant',
-      content: content,
-      rawContent: content, // Send the original content with thinking tags intact
-      fromPeer: fromPeer,
-      requestId: requestId,
-      isComplete: isComplete,
-      isNewMessage: isFirstChunk
-    };
-
-    // Send to all connected peers
-    for (const conn of conns) {
-      conn.write(JSON.stringify(messageObj));
-    }
-  }
-}
-
 // Export functions
 export {
   setupPeerMessageHandler,
   broadcastToPeers,
-  streamToPeers,
   peerHandlers
 };

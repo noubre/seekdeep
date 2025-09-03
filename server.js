@@ -312,27 +312,9 @@ function handleModelRequest(conn) {
   }
 }
 
-// Handle peer message
+// Handle peer message (no longer forwards messages since we're always in private mode)
 function handlePeerMessage(conn, message) {
-  try {
-    const senderKey = b4a.toString(conn.remotePublicKey, 'hex');
-    console.log(`Handling peer message from ${senderKey.slice(0, 8)}... (${message.messageType})`);
-    
-    // Broadcast the message to all other connections
-    for (const connection of swarm.connections) {
-      // Skip the sender
-      const connectionKey = b4a.toString(connection.remotePublicKey, 'hex');
-      if (connectionKey === senderKey) {
-        continue;
-      }
-      
-      // Forward the message
-      console.log(`Forwarding message to ${connectionKey.slice(0, 8)}...`);
-      connection.write(JSON.stringify(message));
-    }
-  } catch (error) {
-    console.error('Error handling peer message:', error);
-  }
+  console.log('Ignoring peer message - server always operates in private mode');
 }
 
 // Helper function to check if Ollama is running
