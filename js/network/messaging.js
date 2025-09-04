@@ -162,6 +162,13 @@ function handleModelsUpdateMessage(message) {
     message.models ? message.models.map(m => m.name).join(', ') : 'No models');
   
   if (!isSessionHost() && message.models && Array.isArray(message.models)) {
+    // Import the UI functions to clear loading state
+    import('../ui/elements.js').then(({ setRefreshModelsLoading, updateRefreshModelsTooltip }) => {
+      // Clear the loading state for the refresh button
+      setRefreshModelsLoading(false);
+      updateRefreshModelsTooltip(`Last refreshed: ${new Date().toLocaleTimeString()}`);
+    });
+    
     // Update our models dropdown with the host's models
     updateModelSelect(message.models);
     

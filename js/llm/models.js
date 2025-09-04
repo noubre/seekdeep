@@ -50,52 +50,88 @@ function getLMStudioBaseUrl() {
 }
 
 /**
- * Fetch available models from Ollama
+ * Fetch available models from the current provider
  * @param {boolean} returnModelsOnly - Whether to only return the models without updating the UI
+ * @param {string} providerOverride - Optional provider to use instead of current provider
  * @returns {Promise<Array>} A promise that resolves to the array of models
  */
-async function fetchAvailableModels(returnModelsOnly = false) {
+async function fetchAvailableModels(returnModelsOnly = false, providerOverride = null) {
   try {
-    // Get base URL for Ollama
-    const baseUrl = getOllamaBaseUrl();
-    const modelsUrl = new URL('/api/tags', baseUrl);
+    // Import getCurrentProvider dynamically to avoid circular dependency
+    const { getCurrentProvider } = await import('./provider.js');
+    const currentProvider = providerOverride || getCurrentProvider();
     
-    console.log('Fetching available models directly from Ollama:', modelsUrl.toString());
+    let baseUrl, modelsUrl, models;
     
-    const response = await fetch(modelsUrl);
-    
-    if (!response.ok) {
-      throw new Error(`HTTP error: ${response.status}`);
+    if (currentProvider === 'lmstudio') {
+      // Fetch models from LM Studio
+      baseUrl = getLMStudioBaseUrl();
+      modelsUrl = new URL('/api/v0/models', baseUrl);
+      
+      console.log('Fetching available models from LM Studio:', modelsUrl.toString());
+      
+      const response = await fetch(modelsUrl);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      // LM Studio returns models in a different format
+      if (data.data && Array.isArray(data.data) && data.data.length > 0) {
+        // Transform LM Studio model format to match our expected format
+        models = data.data.map(model => ({
+          name: model.id,
+          id: model.id,
+          modified_at: model.created || new Date().toISOString()
+        }));
+      } else {
+        throw new Error('No models returned from LM Studio');
+      }
+    } else {
+      // Fetch models from Ollama (default)
+      baseUrl = getOllamaBaseUrl();
+      modelsUrl = new URL('/api/tags', baseUrl);
+      
+      console.log('Fetching available models from Ollama:', modelsUrl.toString());
+      
+      const response = await fetch(modelsUrl);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.models && Array.isArray(data.models) && data.models.length > 0) {
+        models = data.models;
+      } else {
+        throw new Error('No models returned from Ollama');
+      }
     }
     
-    const data = await response.json();
-    
-    if (data.models && Array.isArray(data.models) && data.models.length > 0) {
+    if (models && models.length > 0) {
       // If we only need to return the models, don't update the UI
       if (returnModelsOnly) {
-        return data.models;
+        return models;
       }
       
       // Update the model select dropdown
-      updateModelSelect(data.models);
+      updateModelSelect(models);
       
       // Update timestamp on refresh button
       updateRefreshModelsTooltip(`Last refreshed: ${new Date().toLocaleTimeString()}`);
       
-      console.log(`Loaded ${data.models.length} models from Ollama`);
+      console.log(`Loaded ${models.length} models from ${currentProvider}`);
       
       // Also return the models if requested
-      return data.models;
+      return models;
     } else {
-      // If no models were returned, fall back to default models
-      populateDefaultModels();
-      console.log('No models returned from Ollama, using defaults');
-      
-      // Return default models
-      return DEFAULT_MODELS;
+      throw new Error(`No models available from ${currentProvider}`);
     }
   } catch (error) {
-    console.error('Error fetching models from Ollama:', error);
+    console.error(`Error fetching models from current provider:`, error);
     // Fall back to default models on error
     populateDefaultModels();
     
@@ -229,8 +265,8 @@ function shareModelsWithPeer(conn) {
   fetchAvailableModels(true).then(models => {
     // Transform the models to match the format expected by updateModelSelect
     const formattedModels = models.map(model => ({
-      name: model.name,
-      id: model.name,
+      name: model.name || model.id,
+      id: model.id || model.name,
       modified_at: model.modified_at
     }));
     
@@ -240,7 +276,7 @@ function shareModelsWithPeer(conn) {
       models: formattedModels
     }));
     
-    console.log('Sent models to peer');
+    console.log('Sent models to peer from current provider');
   }).catch(err => {
     console.error('Error fetching models for peer request:', err);
   });

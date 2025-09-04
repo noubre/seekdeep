@@ -189,6 +189,19 @@ function handleRefreshModelsClick() {
   
   // If we're connected as a peer to a host, we should request models from the host
   if (!isSessionHost() && requestModelsFromHost()) {
+    // Set a timeout to clear loading state if no response is received
+    setTimeout(() => {
+      // Check if we're still loading (models weren't received)
+      if (refreshModelsButton && refreshModelsButton.classList.contains('refreshing')) {
+        setRefreshModelsLoading(false);
+        addToChatHistory({
+          type: 'system',
+          content: 'Timeout waiting for models from host. Please try again.'
+        });
+        updateRefreshModelsTooltip('Request timed out');
+      }
+    }, 10000); // 10 second timeout
+    
     // The actual refresh will happen when we receive the models from the host
     return;
   }
