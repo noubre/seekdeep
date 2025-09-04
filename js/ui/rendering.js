@@ -102,7 +102,7 @@ function createMessageElement(message) {
   
   // Store request ID for later reference
   if (message.requestId) {
-    messageEl.dataset.requestId = message.requestId;
+    messageEl.setAttribute('data-request-id', message.requestId);
   }
   
   return messageEl;
@@ -110,43 +110,82 @@ function createMessageElement(message) {
 
 /**
  * Update the chat display from the history
+ * @param {boolean} forceFullRender - Force a complete re-render of all messages
  */
-function updateChatDisplay() {
+function updateChatDisplay(forceFullRender = false) {
   if (!chatMessagesEl) return;
   
-  // Clear current display
-  chatMessagesEl.innerHTML = '';
-  
-  // Keep track of the last message type to avoid duplicates
-  let lastMessageType = null;
-  let lastMessageContent = null;
-  
   const chatHistory = getChatHistory();
-  // console.log(JSON.stringify(chatHistory, null, 2));
-  console.log(`Length of chat history: ${chatHistory.length}`)
+  console.log(`Length of chat history: ${chatHistory.length}`);
+  
+  // If we need a full render or the DOM is empty, do a complete rebuild
+  if (forceFullRender || chatMessagesEl.children.length === 0) {
+    // Clear current display
+    chatMessagesEl.innerHTML = '';
+    
+    // Keep track of the last message type to avoid duplicates
+    let lastMessageType = null;
+    let lastMessageContent = null;
 
-  for (const message of chatHistory) {
-    // Skip duplicate consecutive assistant messages
-    // TODO: Fix this
-    if (message.type === 'assistant' && lastMessageType === 'assistant' && message.content === lastMessageContent) {
-      console.log(`Skipping duplicate consecutive message in display: ${message.content}`);
-      continue;
+    for (const message of chatHistory) {
+      // Skip duplicate consecutive assistant messages
+      if (message.type === 'assistant' && lastMessageType === 'assistant' && message.content === lastMessageContent) {
+        console.log(`Skipping duplicate consecutive message in display: ${message.content}`);
+        continue;
+      }
+      
+      // Create and append message element
+      const messageEl = createMessageElement(message);
+      chatMessagesEl.appendChild(messageEl);
+      
+      lastMessageType = message.type;
+      lastMessageContent = message.content;
     }
     
-    // Create and append message element
-    const messageEl = createMessageElement(message);
-    chatMessagesEl.appendChild(messageEl);
-    
-    lastMessageType = message.type;
-    lastMessageContent = message.content;
+    console.log("Before scroll - scrollTop:", chatMessagesEl.scrollTop, "scrollHeight:", chatMessagesEl.scrollHeight);
+    // Scroll to the bottom using requestAnimationFrame
+    requestAnimationFrame(() => {
+      chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+      console.log("After scroll - scrollTop:", chatMessagesEl.scrollTop, "scrollHeight:", chatMessagesEl.scrollHeight);
+    });
+  } else {
+    // For streaming updates, just update the last assistant message if it exists
+    const lastMessage = chatHistory[chatHistory.length - 1];
+    if (lastMessage && lastMessage.type === 'assistant' && lastMessage.requestId) {
+      // Find the existing assistant message element with this request ID
+      const existingEl = chatMessagesEl.querySelector(`.assistant-message[data-request-id="${lastMessage.requestId}"]`);
+      if (existingEl) {
+        // Update the existing element's content
+        const messageBody = existingEl.querySelector('.message-body');
+        if (messageBody) {
+          let messageContent = '';
+          if (lastMessage.rawContent) {
+            messageContent = formatThinkingContent(lastMessage.rawContent);
+          } else {
+            messageContent = lastMessage.content || '';
+          }
+          
+          // Render Markdown if content seems to contain it
+          if (containsMarkdown(messageContent) || messageContent.includes('<div class="thinking-content">')) {
+            messageBody.innerHTML = renderMarkdown(messageContent);
+          } else {
+            messageBody.innerHTML = messageContent.replace(/\n/g, '<br>');
+          }
+          
+          // Scroll to bottom if we're near the bottom
+          const isNearBottom = chatMessagesEl.scrollTop + chatMessagesEl.clientHeight >= chatMessagesEl.scrollHeight - 50;
+          if (isNearBottom) {
+            requestAnimationFrame(() => {
+              chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+            });
+          }
+        }
+      } else {
+        // If we can't find the existing element, fall back to full render
+        updateChatDisplay(true);
+      }
+    }
   }
-  
-  console.log("Before scroll - scrollTop:", chatMessagesEl.scrollTop, "scrollHeight:", chatMessagesEl.scrollHeight);
-  // Scroll to the bottom using requestAnimationFrame
-  requestAnimationFrame(() => {
-    chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
-    console.log("After scroll - scrollTop:", chatMessagesEl.scrollTop, "scrollHeight:", chatMessagesEl.scrollHeight);
-  });
 }
 
 /**

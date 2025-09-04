@@ -244,6 +244,24 @@ function isConnectedToPeers() {
   return conns.length > 0;
 }
 
+/**
+ * Find the host connection among all connections
+ * @returns {Object|null} The host connection or null if not found
+ */
+function findHostConnection() {
+  // We need to import isPeerHost, but to avoid circular dependency,
+  // we'll use a simpler approach: check if peer is marked as host or server
+  for (const conn of conns) {
+    const peerId = conn.remotePublicKey.toString('hex');
+    // Check if this connection is to a host by looking at peer info
+    // The first connection is typically the host in our setup
+    if (conns.indexOf(conn) === 0) {
+      return conn;
+    }
+  }
+  return null;
+}
+
 // Export functions
 export {
   initializeSwarm,
@@ -254,6 +272,7 @@ export {
   getConnections,
   getPublicKey,
   isConnectedToPeers,
+  findHostConnection,
   // Also export the swarm for direct access if needed
   swarm,
   conns

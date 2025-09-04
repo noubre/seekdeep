@@ -12,7 +12,7 @@ import {
 import { parseOllamaResponse, formatThinkingContent } from '../messages/formatting.js';
 import { isSessionHost, getCollaborativeMode } from '../session/modes.js';
 import { broadcastToPeers } from '../network/messaging.js';
-import { conns } from '../network/hyperswarm.js';
+import { conns, findHostConnection } from '../network/hyperswarm.js';
 import { getPeerDisplayName } from '../session/peers.js';
 import { updateChatDisplay } from '../ui/rendering.js';
 
@@ -169,9 +169,9 @@ async function ask(model, prompt) {
 
       // Log the final state
       console.log("Final message content:", assistantMessage.rawContent);
-      console.log("Contains thinking tags:", assistantMessage.rawContent.includes("<think>"));
+      console.log("Contains thinking tags:", assistantMessage.rawContent && assistantMessage.rawContent.includes("<think>"));
       console.log("Processed content:", assistantMessage.content);
-      console.log("Contains thinking HTML:", assistantMessage.content.includes("thinking-content"));
+      console.log("Contains thinking HTML:", assistantMessage.content && assistantMessage.content.includes("thinking-content"));
 
       // Find the last assistant message with this request ID
       lastAssistantMessage = findLastMessageByRequestId(requestId, 'assistant');
@@ -197,31 +197,12 @@ async function ask(model, prompt) {
       // Return the full response for any further processing
       return responseText;
     } else {
-      // If we're not the host, we will select random subset of peers to send message to for gossip protocol.
-      // Function to calculate k based on the total number of peers
+      // If we're not the host, send the query directly to the host
+      const hostConn = findHostConnection();
 
-      function calculateK(n) {
-        if (n <= 1) return n; // Handle edge cases: 0 or 1 peer
-        return Math.max(1, Math.min(n, Math.ceil(Math.log(n + 1) / Math.log(2)))); // Log base 2
+      if (!hostConn) {
+        throw new Error('Not connected to a host');
       }
-
-      const n = conns.length; // Total number of peers
-      const k = calculateK(n); // Dynamically calculate k
-
-      // Shuffle the array and select the first k peers
-      const shuffled = conns.slice().sort(() => 0.5 - Math.random());
-      const randomConns = shuffled.slice(0, k);
-
-      // Log the result for demonstration
-      console.log(`Total peers: ${n}`);
-      console.log(`Selected k: ${k}`);
-      console.log(`Peers to propagate to: ${randomConns}`);
-
-      // const hostConn = conns[0];
-
-      // if (!hostConn) {
-      //   throw new Error('Not connected to a host');
-      // }
 
       // Store the requestId as our activeRequestId so we can track responses
       setActiveRequestId(requestId);
@@ -233,20 +214,20 @@ async function ask(model, prompt) {
       });
       console.log(`Setting activeRequestId to: ${requestId} for our peer query`);
 
-      // Send the query to the random selected conns
-      for (const conn of randomConns) {
-        conn.write(JSON.stringify({
-          type: 'query',
-          model,
-          prompt,
-          requestId,
-          fromPeerId: conn.remotePublicKey.toString('hex')
-        }));
-      }
+      // Get our own peer ID from the hyperswarm module
+      const { getPublicKey } = await import('../network/hyperswarm.js');
+      const ourPeerId = getPublicKey();
 
+      // Send the query directly to the host
+      hostConn.write(JSON.stringify({
+        type: 'query',
+        model,
+        prompt,
+        requestId,
+        fromPeerId: ourPeerId // This should be the peer's own ID, not the host's ID
+      }));
 
-      // The response will come back asynchronously via the message handler
-      console.log('Query sent to random conns, awaiting eventual response from the host');
+      console.log('Query sent directly to host, awaiting response');
       return null;
     }
   } catch (error) {

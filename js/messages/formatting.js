@@ -19,15 +19,29 @@ function formatThinkingContent(text) {
     return text;
   }
   
-  // Process thinking tags with a regular expression
-  return text.replace(/<think>([\s\S]*?)<\/think>/g, (match, thinkContent) => {
-    // If thinking content only contains whitespace/newlines, remove it completely
-    if (!thinkContent.trim()) {
-      return '';
-    }
+  // Extract all thinking content first
+  let allThinkingContent = '';
+  const thinkingMatches = text.match(/<think>([\s\S]*?)<\/think>/g) || [];
+  
+  if (thinkingMatches.length > 0) {
+    // Get the content from the last thinking tag (most up-to-date)
+    const lastThinkingMatch = thinkingMatches[thinkingMatches.length - 1];
+    allThinkingContent = lastThinkingMatch.replace(/<think>([\s\S]*?)<\/think>/, '$1');
+  }
+  
+  // Remove all thinking tags from the original text
+  let cleanedText = text.replace(/<think>[\s\S]*?<\/think>/g, '');
+  
+  // If we have thinking content, add it back with proper formatting
+  if (allThinkingContent.trim()) {
     // Format thinking content with special styling for rendering in the UI
-    return `<div class="thinking-content"><span class="thinking-label">Thinking:</span>${thinkContent}</div>`;
-  });
+    const formattedThinking = `<div class="thinking-content"><span class="thinking-label">Thinking:</span>\n${allThinkingContent}</div>`;
+    
+    // Add the formatted thinking content back to the text
+    return formattedThinking + cleanedText;
+  }
+  
+  return cleanedText;
 }
 
 /**

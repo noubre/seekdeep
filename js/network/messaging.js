@@ -7,7 +7,7 @@ import { updateActivePeer, getPeerDisplayName, isPeerHost } from '../session/pee
 import { isSessionHost, getCollaborativeMode } from '../session/modes.js';
 import { updateModelSelect, shareModelsWithPeer } from '../llm/models.js';
 import { handlePeerQuery } from '../llm/provider.js';
-import { conns } from './hyperswarm.js';
+import { conns, findHostConnection } from './hyperswarm.js';
 import { 
   isActiveRequest, 
   findLastMessageByRequestId, 
@@ -208,38 +208,25 @@ function handleQueryMessage(conn, message, peerId) {
       });
     }
   } else {
-    console.log('Received query message but we are not the host, sending to random peers for propogation');
+    console.log('Received query message but we are not the host, forwarding directly to host');
 
-    function calculateK(n) {
-      if (n <= 1) return n; // Handle edge cases: 0 or 1 peer
-      return Math.max(1, Math.min(n, Math.ceil(Math.log(n + 1) / Math.log(2)))); // Log base 2
-    }
-
-    const n = conns.length; // Total number of peers
-    const k = calculateK(n); // Dynamically calculate k
-
-    // Shuffle the array and select the first k peers
-    const shuffled = conns.slice().sort(() => 0.5 - Math.random());
-    const randomConns = shuffled.slice(0, k);
-
-    // Log the result for demonstration
-    console.log(`Total peers: ${n}`);
-    console.log(`Selected k: ${k}`);
-    console.log(`Peers to propagate to: ${randomConns}`);
-
-    // Send the query to the random selected conns
-    for (const conn of randomConns) {
-      conn.write(JSON.stringify({
-        type: 'query',
-        model,
-        prompt,
-        requestId,
-        fromPeerId: conn.remotePublicKey.toString('hex')
-      }));
-    }
+    // Find the host connection and forward the query
+    const hostConn = findHostConnection();
     
-    // The response will come back asynchronously via the message handler
-    console.log('Query sent to random conns, awaiting eventual response from the host');
+    if (hostConn) {
+      // Forward the query directly to the host
+      hostConn.write(JSON.stringify({
+        type: 'query',
+        model: message.model,
+        prompt: message.prompt,
+        requestId: message.requestId,
+        fromPeerId: message.fromPeerId
+      }));
+      
+      console.log('Query forwarded directly to host');
+    } else {
+      console.warn('No host connection found to forward query');
+    }
   }
 }
 
@@ -280,11 +267,16 @@ function handleResponseMessage(message) {
     }
     
     console.log("Processed response content:", responseContent);
-    console.log("Contains thinking tags:", responseContent.includes("<think>"));
+    console.log("Contains thinking tags:", responseContent && responseContent.includes("<think>"));
     
     // Make sure responseContent is a string
     if (responseContent && typeof responseContent !== 'string') {
       responseContent = JSON.stringify(responseContent);
+    }
+    
+    // Ensure responseContent is always a string (empty string if undefined/null)
+    if (!responseContent || typeof responseContent !== 'string') {
+      responseContent = '';
     }
     
     // In private mode (message.isPrivate === true), the response should only be shown 

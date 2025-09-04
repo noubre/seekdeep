@@ -12,7 +12,7 @@ import {
 import { parseOllamaResponse, formatThinkingContent } from '../messages/formatting.js';
 import { isSessionHost, getCollaborativeMode } from '../session/modes.js';
 import { broadcastToPeers } from '../network/messaging.js';
-import { conns } from '../network/hyperswarm.js';
+import { conns, findHostConnection } from '../network/hyperswarm.js';
 import { getPeerDisplayName } from '../session/peers.js';
 import { updateChatDisplay } from '../ui/rendering.js';
 
@@ -99,7 +99,8 @@ async function ask(model, prompt) {
         rawContent: '',
         requestId: requestId,
         fromPeer: 'Host',
-        isComplete: false
+        isComplete: false,
+        currentReasoningContent: '' // Track accumulated reasoning content
       };
 
       // Add the initial empty message to the chat history
@@ -132,7 +133,36 @@ async function ask(model, prompt) {
               // Extract content from LM Studio's response format
               const delta = json.choices?.[0]?.delta;
               const responseChunk = delta?.content || '';
+              const reasoningChunk = delta?.reasoning_content || '';
               
+              // Handle reasoning content (thinking) from LM Studio
+              if (reasoningChunk) {
+                console.log("Extracted reasoning chunk from LM Studio:", reasoningChunk);
+                
+                // Accumulate reasoning content
+                assistantMessage.currentReasoningContent += reasoningChunk;
+                
+                // Update the message with the accumulated reasoning content wrapped in think tags
+                const updatedRawContent = assistantMessage.rawContent.replace(/<think>.*?<\/think>/g, '') + 
+                                         `<think>${assistantMessage.currentReasoningContent}</think>`;
+                
+                assistantMessage.rawContent = updatedRawContent;
+                assistantMessage.content = formatThinkingContent(assistantMessage.rawContent);
+                responseText = updatedRawContent;
+
+                // Find the last assistant message with this request ID
+                lastAssistantMessage = findLastMessageByRequestId(requestId, 'assistant');
+
+                if (lastAssistantMessage) {
+                  // Update the existing message
+                  lastAssistantMessage.rawContent = assistantMessage.rawContent;
+                  lastAssistantMessage.content = assistantMessage.content;
+                  lastAssistantMessage.currentReasoningContent = assistantMessage.currentReasoningContent;
+                  updateChatDisplay(); // Trigger UI update
+                }
+              }
+              
+              // Handle regular content
               if (responseChunk) {
                 console.log("Extracted response chunk from LM Studio:", responseChunk);
                 
@@ -165,7 +195,7 @@ async function ask(model, prompt) {
 
       // Log the final state
       console.log("Final LM Studio message content:", assistantMessage.rawContent);
-      console.log("Contains thinking tags:", assistantMessage.rawContent.includes("<think>"));
+      console.log("Contains thinking tags:", assistantMessage.rawContent && assistantMessage.rawContent.includes("<think>"));
       console.log("Processed content:", assistantMessage.content);
 
       // Find the last assistant message with this request ID
@@ -190,22 +220,12 @@ async function ask(model, prompt) {
       // Return the full response for any further processing
       return responseText;
     } else {
-      // If we're not the host, use gossip protocol to send to random peers
-      function calculateK(n) {
-        if (n <= 1) return n;
-        return Math.max(1, Math.min(n, Math.ceil(Math.log(n + 1) / Math.log(2))));
+      // If we're not the host, send the query directly to the host
+      const hostConn = findHostConnection();
+
+      if (!hostConn) {
+        throw new Error('Not connected to a host');
       }
-
-      const n = conns.length;
-      const k = calculateK(n);
-
-      // Shuffle the array and select the first k peers
-      const shuffled = conns.slice().sort(() => 0.5 - Math.random());
-      const randomConns = shuffled.slice(0, k);
-
-      console.log(`Total peers: ${n}`);
-      console.log(`Selected k: ${k}`);
-      console.log(`Peers to propagate to: ${randomConns.length}`);
 
       // Store the requestId as our activeRequestId so we can track responses
       setActiveRequestId(requestId);
@@ -216,19 +236,21 @@ async function ask(model, prompt) {
       });
       console.log(`Setting activeRequestId to: ${requestId} for our peer query`);
 
-      // Send the query to the random selected conns
-      for (const conn of randomConns) {
-        conn.write(JSON.stringify({
-          type: 'query',
-          model,
-          prompt,
-          requestId,
-          fromPeerId: conn.remotePublicKey.toString('hex'),
-          provider: 'lmstudio' // Indicate this is for LM Studio
-        }));
-      }
+      // Get our own peer ID from the hyperswarm module
+      const { getPublicKey } = await import('../network/hyperswarm.js');
+      const ourPeerId = getPublicKey();
 
-      console.log('Query sent to random conns, awaiting eventual response from the host');
+      // Send the query directly to the host
+      hostConn.write(JSON.stringify({
+        type: 'query',
+        model,
+        prompt,
+        requestId,
+        fromPeerId: ourPeerId, // This should be the peer's own ID, not the host's ID
+        provider: 'lmstudio' // Indicate this is for LM Studio
+      }));
+
+      console.log('Query sent directly to host, awaiting response');
       return null;
     }
   } catch (error) {
@@ -303,8 +325,8 @@ async function handlePeerQuery(conn, message, peerId) {
       });
 
       console.log("Added LM Studio response to host's chat history with thinking content:", {
-        hasThinkingTags: fullResponse.includes("<think>"),
-        hasThinkingHTML: formatThinkingContent(fullResponse).includes("thinking-content")
+        hasThinkingTags: fullResponse && fullResponse.includes("<think>"),
+        hasThinkingHTML: fullResponse && formatThinkingContent(fullResponse).includes("thinking-content")
       });
     }
   } catch (error) {
@@ -369,6 +391,7 @@ async function streamResponseToPeer(conn, model, prompt, requestId, peerId) {
     const reader = response.body.getReader();
     let decoder = new TextDecoder();
     let fullResponseText = '';
+    let currentReasoningContent = ''; // Track accumulated reasoning content
 
     while (true) {
       const { done, value } = await reader.read();
@@ -395,7 +418,47 @@ async function streamResponseToPeer(conn, model, prompt, requestId, peerId) {
             // Extract content from LM Studio's response format
             const delta = json.choices?.[0]?.delta;
             const responseChunk = delta?.content || '';
+            const reasoningChunk = delta?.reasoning_content || '';
             
+            // Handle reasoning content (thinking) from LM Studio
+            if (reasoningChunk) {
+              console.log("Extracted reasoning chunk for LM Studio peer streaming:", reasoningChunk);
+              
+              // Accumulate reasoning content
+              currentReasoningContent += reasoningChunk;
+              
+              // Create a version of the full response with the accumulated reasoning content
+              const updatedResponseText = fullResponseText.replace(/<think>.*?<\/think>/g, '') + 
+                                         `<think>${currentReasoningContent}</think>`;
+              
+              // Send the updated thinking content to the peer
+              const isPrivate = !getCollaborativeMode();
+              
+              // Find the connection for this specific peer and send the chunk
+              for (const peerConn of conns) {
+                const connPeerId = peerConn.remotePublicKey.toString('hex');
+                if (connPeerId === peerId) {
+                  peerConn.write(JSON.stringify({
+                    type: 'response',
+                    requestId: requestId,
+                    // Send the complete thinking content wrapped in think tags
+                    data: `<think>${currentReasoningContent}</think>`,
+                    isComplete: false,
+                    isJson: false,
+                    isPrivate: isPrivate,
+                    fromPeerId: peerId,
+                    isReasoningUpdate: true // Flag to indicate this is a reasoning update
+                  }));
+                  console.log("Sent accumulated LM Studio reasoning to peer");
+                  break;
+                }
+              }
+              
+              // Update the full response text with the accumulated reasoning
+              fullResponseText = updatedResponseText;
+            }
+            
+            // Handle regular content
             if (responseChunk) {
               console.log("Extracted response chunk for LM Studio peer streaming:", responseChunk);
 
@@ -515,6 +578,7 @@ async function queryLocalLLM(model, prompt) {
     const reader = response.body.getReader();
     let decoder = new TextDecoder();
     let responseText = '';
+    let currentReasoningContent = ''; // Track accumulated reasoning content
 
     while (true) {
       const { done, value } = await reader.read();
@@ -541,7 +605,24 @@ async function queryLocalLLM(model, prompt) {
             // Extract content from LM Studio's response format
             const delta = json.choices?.[0]?.delta;
             const responseChunk = delta?.content || '';
+            const reasoningChunk = delta?.reasoning_content || '';
             
+            // Handle reasoning content (thinking) from LM Studio
+            if (reasoningChunk) {
+              console.log("Extracted reasoning chunk for LM Studio peer query:", reasoningChunk);
+              
+              // Accumulate reasoning content
+              currentReasoningContent += reasoningChunk;
+              
+              // Update the response text with the accumulated reasoning content
+              const updatedResponseText = responseText.replace(/<think>.*?<\/think>/g, '') + 
+                                         `<think>${currentReasoningContent}</think>`;
+              
+              // Replace the response text with the updated version
+              responseText = updatedResponseText;
+            }
+            
+            // Handle regular content
             if (responseChunk) {
               console.log("Extracted response chunk for LM Studio peer query:", responseChunk);
               responseText += responseChunk;
@@ -555,7 +636,7 @@ async function queryLocalLLM(model, prompt) {
 
     console.log("Complete response text for LM Studio peer query:", responseText);
     const formattedResponseText = formatThinkingContent(responseText);
-    console.log("Contains thinking tags:", formattedResponseText.includes("<think>"));
+    console.log("Contains thinking tags:", formattedResponseText && formattedResponseText.includes("<think>"));
 
     return responseText;
   } catch (error) {

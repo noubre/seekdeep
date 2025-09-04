@@ -109,9 +109,11 @@ function addActiveRequest(requestId, metadata) {
  * @returns {boolean} True if the request is active
  */
 function isActiveRequest(requestId) {
-  return !requestId || 
-    requestId === activeRequestId || 
-    activeRequests.has(requestId);
+  if (!requestId) {
+    return false; // If no requestId provided, it's not active
+  }
+  
+  return requestId === activeRequestId || activeRequests.has(requestId);
 }
 
 /**
