@@ -12,7 +12,7 @@ const PROVIDERS = {
 };
 
 // Current provider state
-let currentProvider = PROVIDERS.OLLAMA; // Default to Ollama for backward compatibility
+let currentProvider = PROVIDERS.LMSTUDIO; // Default to LM Studio
 
 /**
  * Get the current provider
