@@ -1,5 +1,7 @@
 # Project Brief: SeekDeep
 
+**Last Updated:** November 15, 2025
+
 ## Overview
 SeekDeep is a P2P-enabled desktop application that interfaces with local Large Language Models (LLMs) through Ollama. It provides a clean, minimalist UI for interacting with LLMs while enabling peer-to-peer collaboration through Hyperswarm and Hypercore technologies.
 

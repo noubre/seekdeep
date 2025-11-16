@@ -1,5 +1,7 @@
 # System Patterns: SeekDeep
 
+**Last Updated:** November 15, 2025
+
 ## Architecture Overview
 SeekDeep follows a modular hybrid client-server and peer-to-peer architecture with clear separation of concerns across ES6 modules:
 

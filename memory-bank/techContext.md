@@ -1,5 +1,7 @@
 # Technical Context: SeekDeep
 
+**Last Updated:** November 15, 2025
+
 ## Technology Stack
 
 ### Core Technologies

@@ -1,5 +1,7 @@
 # Product Context: SeekDeep
 
+**Last Updated:** November 15, 2025
+
 ## Problem Statement
 Users of local LLMs often face challenges in collaborating and sharing insights. Traditional LLM interfaces lack P2P capabilities, making it difficult for teams to work together with AI assistance. Additionally, local LLM deployments typically don't support real-time collaboration or sharing of model capabilities across different machines.
 
