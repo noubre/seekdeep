@@ -10,11 +10,13 @@
 - Model sharing happens automatically during handshake and on-demand via refresh
 
 ### Code Organization
-- `app.js` contains all desktop application logic
+- Modular ES6 architecture in `js/` directory with clear separation of concerns
+- `js/main.js` is the application bootstrap entry point
 - `server.js` contains the standalone server component
 - `index.html` contains both UI structure and styling
 - No build step or transpilation is used - vanilla JS only
 - Tests are organized by component (app, server, integration, e2e)
+- Module organization follows domain-driven design (ui/, llm/, network/, session/, messages/)
 
 ### Error Handling
 - Network errors are caught and displayed as system messages
@@ -31,11 +33,26 @@
 
 ## Implementation Paths
 
+### Adding Session Persistence Features
+1. For new session metadata:
+   - Add fields to session metadata object in `session/storage.js`
+   - Update `saveSession()` to include new fields
+   - Update UI in `ui/history-browser.js` to display new metadata
+2. For new persistence operations:
+   - Add function to `session/storage.js` for low-level localStorage operation
+   - Add coordination function to `messages/persistence-manager.js`
+   - Add UI trigger in `ui/history-browser.js` if user-facing
+3. For session import/export enhancements:
+   - Modify export format in `persistence-manager.js: exportSession()`
+   - Update import validation in `persistence-manager.js: importSessionFromFile()`
+   - Consider backward compatibility with existing exports
+
 ### Adding a New Message Type
 1. Define the message structure with appropriate fields
 2. Add a handler in the message processing switch statement
 3. Create a UI rendering function for the new message type
 4. Update the message history tracking
+5. Consider persistence implications (should message be persisted?)
 
 ### Implementing a New Feature
 1. Add UI elements to index.html if needed
@@ -80,16 +97,23 @@
 - Message ordering is not guaranteed
 
 ### LLM Integration
-- Ollama must be installed and running
-- Model availability varies between users
-- Response times depend on hardware capabilities
-- Streaming responses require special handling
+- At least one provider (Ollama or LM Studio) must be installed and running
+- Model availability varies between users and providers
+- Response times depend on hardware capabilities and provider efficiency
+- Streaming responses require special handling across different provider APIs
 
 ### Desktop Integration
 - Pear Runtime must be installed
 - Window dimensions are fixed
 - Limited access to system resources
 - Cross-platform compatibility considerations
+
+### Persistence System
+- localStorage has quota limits (~5-10MB typical)
+- No automatic cloud backup or cross-device sync
+- Sessions are device-specific
+- Hyperbee/Hypercore incompatible with Pear browser environment (file system access required)
+- Large sessions may hit storage quota or cause performance issues
 
 ## Tool Usage Patterns
 
@@ -98,15 +122,26 @@
 - Run `node server.js` for standalone server
 - Use `npm test` for running test suite
 - Check `npm run test:coverage` for test coverage
+- Test persistence with browser DevTools (Application > localStorage)
 
 ### Debugging
 - Check browser console for client-side errors
 - Server logs provide P2P connection details
 - Request IDs help track message flow
 - System messages show important status updates
+- localStorage inspector shows session data and registry
+- Module loading issues visible in Network tab
+
+### Persistence Debugging
+- Use browser DevTools > Application > Local Storage to inspect data
+- Check session registry at key `seekdeep-sessions-registry`
+- Individual sessions stored with keys like `seekdeep-session-{id}`
+- Console logs prefixed with `[Storage]`, `[PersistenceManager]`, or `[HistoryBrowser]`
+- Monitor storage quota with `getStorageStats()`
 
 ### Deployment
 - Package with Pear for desktop distribution
-- Ensure Ollama is installed on target systems
+- Ensure at least one LLM provider (Ollama or LM Studio) is installed on target systems
 - Document P2P connection process for users
 - Provide sample commands for server setup
+- Inform users about localStorage usage and session persistence

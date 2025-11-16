@@ -17,6 +17,7 @@
 - **HTML/CSS**: Standard web technologies for UI structure and styling
 - **Vanilla JavaScript**: Core language for application logic with modular organization
 - **Marked.js**: Library for Markdown parsing and rendering
+- **localStorage API**: Browser storage for session persistence
 
 ### LLM Provider Integration
 - **Ollama API**: Interface to local LLM models (port 11434)
@@ -48,7 +49,8 @@ seekdeep/
 │   ├── ui/                # User interface modules
 │   │   ├── elements.js    # DOM element management
 │   │   ├── events.js      # Event handling
-│   │   └── rendering.js   # Display rendering
+│   │   ├── rendering.js   # Display rendering
+│   │   └── history-browser.js # Session history sidebar
 │   ├── llm/               # LLM provider modules
 │   │   ├── provider.js    # Provider abstraction layer
 │   │   ├── ollama.js      # Ollama integration
@@ -59,10 +61,13 @@ seekdeep/
 │   │   └── messaging.js   # Message protocol
 │   ├── session/           # Session management modules
 │   │   ├── modes.js       # Chat mode management
-│   │   └── peers.js       # Peer state management
+│   │   ├── peers.js       # Peer state management
+│   │   └── storage.js     # localStorage session storage
 │   └── messages/          # Message handling modules
 │       ├── formatting.js  # Message formatting
-│       └── history.js     # Chat history
+│       ├── history.js     # Chat history
+│       ├── persistence.js # Hyperbee persistence (disabled)
+│       └── persistence-manager.js # Persistence coordination
 ├── index.html             # Main UI structure and styling
 ├── server.js              # Optional standalone server component
 ├── package.json           # Project configuration and dependencies
@@ -122,6 +127,19 @@ seekdeep/
 - **Mode Controls**: UI for switching between collaborative and private modes
 - **Provider Selection**: UI for selecting and monitoring LLM providers
 - **Model Selection**: Dropdown for selecting models from active provider
+- **History Browser**: Sidebar for browsing and managing saved sessions
+- **Export/Import Controls**: Buttons for session export/import with file picker
+
+### Persistence Architecture
+- **Three-Layer System**:
+  1. Storage layer (session/storage.js) - localStorage CRUD operations
+  2. Persistence manager (messages/persistence-manager.js) - Coordination
+  3. UI layer (ui/history-browser.js) - User interface
+- **localStorage Storage**: Browser-native persistence with 5-10MB typical quota
+- **Session Registry**: Centralized registry for session metadata
+- **JSON Export/Import**: Portable session data format
+- **Search & Filter**: Real-time search across saved sessions
+- **Metadata Tracking**: Session info (name, timestamp, message count, model, provider)
 
 ## Technical Constraints
 
@@ -149,6 +167,13 @@ seekdeep/
 - Module loading order dependencies must be managed
 - Dynamic imports may affect startup performance
 - Module boundaries must be maintained for testability
+
+### Storage Constraints
+- localStorage quota limitations (~5-10MB typical browser limit)
+- Sessions are device-specific (no cross-device sync)
+- No automatic cloud backup
+- Hyperbee/Hypercore incompatible with Pear browser environment
+- Data persists only for same origin/domain
 
 ## Integration Points
 
@@ -181,6 +206,13 @@ seekdeep/
 - Centralized initialization through main.js
 - Module-specific configuration and state management
 
+### Storage Integration
+- localStorage API for session persistence
+- Session registry pattern for metadata management
+- JSON serialization for session data
+- File download/upload for export/import
+- Integration with chat history module
+
 ### Desktop Integration
 - Pear Runtime for window management
 - Multi-port configuration for provider support
@@ -202,6 +234,13 @@ seekdeep/
 - Module initialization order affects startup time
 - Module boundaries enable better code splitting and caching
 
+### Storage Performance
+- localStorage operations are synchronous (blocking)
+- Session registry caching reduces localStorage reads
+- Search operations scan in-memory registry (fast)
+- Large session data may impact load times
+- JSON parsing/stringification overhead for large sessions
+
 ### Network Performance
 - Message size optimization for efficient P2P communication
 - Provider context in messages adds minimal overhead
@@ -214,3 +253,5 @@ seekdeep/
 - Markdown rendering optimization with provider-specific formatting
 - Chat history management for long sessions with provider attribution
 - Provider status monitoring adds minimal UI overhead
+- History browser sidebar renders on-demand (not always visible)
+- Session list virtualization for handling many saved sessions

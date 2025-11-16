@@ -55,10 +55,6 @@ The application is organized into focused modules with clear responsibilities:
 - **Module Coordination**: Manages inter-module communication
 - **Event System**: Sets up global event listeners and dispatchers
 
-#### UI Modules (js/ui/)
-- **elements.js**: DOM element creation and management
-- **events.js**: Event handler setup and user interaction management
-- **rendering.js**: Display rendering and UI updates
 
 #### LLM Modules (js/llm/)
 - **provider.js**: Provider abstraction layer and auto-detection
@@ -70,13 +66,22 @@ The application is organized into focused modules with clear responsibilities:
 - **hyperswarm.js**: P2P networking and connection management
 - **messaging.js**: Message protocol implementation and handling
 
-#### Session Modules (js/session/)
-- **modes.js**: Chat mode management (collaborative/private)
-- **peers.js**: Peer connection and state management
+#### UI Modules (js/ui/)
+- **elements.js**: DOM element creation and management
+- **events.js**: Event handler setup and user interaction management
+- **rendering.js**: Display rendering and UI updates
+- **history-browser.js**: Session history sidebar interface
 
 #### Message Modules (js/messages/)
 - **formatting.js**: Message formatting and markdown processing
 - **history.js**: Chat history management and persistence
+- **persistence.js**: Hyperbee/Hypercore persistence implementation (disabled)
+- **persistence-manager.js**: High-level persistence coordination
+
+#### Session Modules (js/session/)
+- **modes.js**: Chat mode management (collaborative/private)
+- **peers.js**: Peer connection and state management
+- **storage.js**: localStorage-based session storage system
 
 ### Server Component (server.js)
 - **HTTP Server**: Provides API endpoints for local access
@@ -134,7 +139,56 @@ The application is organized into focused modules with clear responsibilities:
 - **UI Integration**: Peer UI shows host's provider and models
 - **Provider Switching**: Model list updates when host changes provider
 
+### Persistence Pattern
+- **localStorage-based Storage**: Browser localStorage for session persistence
+- **Session Registry**: Central registry tracking all saved sessions
+- **Metadata Tracking**: Session metadata (id, name, timestamp, messages, model, provider)
+- **Export/Import**: JSON file export/import for portability
+- **History Browser**: Sidebar UI for browsing and managing saved sessions
+
+### Storage Architecture Pattern
+- **Three-Layer Design**: 
+  1. Storage module (session/storage.js) - Low-level localStorage operations
+  2. Persistence manager (messages/persistence-manager.js) - Coordination layer
+  3. History browser (ui/history-browser.js) - UI presentation layer
+- **Registry Pattern**: Centralized session registry for quick metadata access
+- **CRUD Operations**: Full create, read, update, delete for session management
+- **Search Capability**: Real-time search across session metadata
+
 ## Data Flow Patterns
+
+### Session Persistence Flow
+```mermaid
+sequenceDiagram
+    participant User
+    participant UI
+    participant PersistenceManager
+    participant Storage
+    participant localStorage
+    
+    User->>UI: Click "Export" button
+    UI->>PersistenceManager: exportSession()
+    PersistenceManager->>History: getChatHistory()
+    PersistenceManager->>Storage: saveSession(data)
+    Storage->>localStorage: Save session data
+    Storage->>localStorage: Update registry
+    Storage-->>PersistenceManager: Session metadata
+    PersistenceManager->>User: Download JSON file
+    
+    User->>UI: Click "History" button
+    UI->>HistoryBrowser: toggleHistoryBrowser()
+    HistoryBrowser->>Storage: listSessions()
+    Storage->>localStorage: Get registry
+    Storage-->>HistoryBrowser: Session list
+    HistoryBrowser->>UI: Render session list
+    
+    User->>UI: Select session to load
+    HistoryBrowser->>Storage: loadSession(id)
+    Storage->>localStorage: Get session data
+    Storage-->>HistoryBrowser: Session data
+    HistoryBrowser->>History: Load messages
+    HistoryBrowser-->>User: Session loaded
+```
 
 ### Multi-Provider Query Flow
 ```mermaid
@@ -245,6 +299,8 @@ sequenceDiagram
 - **Modular Unit Tests**: Individual module testing with isolated dependencies
 - **Integration Tests**: Cross-module interaction testing
 - **Provider Tests**: Multi-provider scenario testing
-- **Mock Objects**: Simulation of external dependencies and providers
+- **Persistence Tests**: localStorage operations and session management testing
+- **Mock Objects**: Simulation of external dependencies, providers, and storage
 - **Test Fixtures**: Predefined test data and environments
 - **Module Mocking**: ES6 module mocking for isolated testing
+- **Storage Mocking**: localStorage mock for testing persistence without browser environment
