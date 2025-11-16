@@ -1,4 +1,5 @@
 import URLError from './lib/errors'
+import URLSearchParams from './lib/url-search-params'
 
 interface URL {
   href: string
@@ -10,6 +11,7 @@ interface URL {
   port: string
   pathname: string
   search: string
+  searchParams: URLSearchParams
   hash: string
 
   toString(): string
@@ -31,7 +33,7 @@ declare namespace URL {
 
   export function pathToFileURL(pathname: string): URL
 
-  export { URL, type URLError, URLError as errors }
+  export { URL, type URLError, URLError as errors, URLSearchParams }
 }
 
 export = URL

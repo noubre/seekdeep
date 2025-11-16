@@ -28,6 +28,30 @@
       -webkit-app-region: no-drag;
     }
     
+    #history-toggle {
+      -webkit-app-region: no-drag;
+      background-color: transparent;
+      border: none;
+      color: #D8DEE9;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 13px;
+      transition: background-color 0.2s;
+    }
+    
+    #history-toggle:hover {
+      background-color: rgba(255, 255, 255, 0.1);
+    }
+    
+    #history-toggle svg {
+      width: 16px;
+      height: 16px;
+    }
+    
     #chat-container {
       flex: 1;
       display: flex;
@@ -311,6 +335,38 @@
       100% { transform: rotate(360deg); }
     }
     
+    /* Persistence control buttons */
+    #export-history, #clear-history {
+      background-color: #4C566A;
+      color: #E5E9F0;
+      border: none;
+      border-radius: 4px;
+      padding: 6px 10px;
+      font-size: 14px;
+      cursor: pointer;
+      margin-left: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    #export-history:hover {
+      background-color: #5E81AC;
+    }
+    
+    #clear-history:hover {
+      background-color: #BF616A;
+    }
+    
+    #export-history svg, #clear-history svg {
+      width: 14px;
+      height: 14px;
+    }
+    
+    #persistence-enabled {
+      accent-color: #5E81AC;
+    }
+    
     form {
       padding: 10px;
       display: flex;
@@ -582,13 +638,291 @@
       height: auto;
       border-radius: 4px;
     }
+    
+    /* History Browser Sidebar Styles */
+    #history-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0, 0, 0, 0.5);
+      z-index: 999;
+      display: none;
+    }
+    
+    #history-sidebar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 320px;
+      height: 100%;
+      background-color: #1F2430;
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 2px 0 10px rgba(0, 0, 0, 0.3);
+      transition: transform 0.3s ease-in-out;
+      transform: translateX(-100%);
+    }
+    
+    .sidebar-header {
+      padding: 16px;
+      background-color: #171C27;
+      border-bottom: 1px solid #3B4252;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    
+    .sidebar-header h2 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+      color: #E5E9F0;
+    }
+    
+    .sidebar-close {
+      background-color: transparent;
+      border: none;
+      color: #D8DEE9;
+      cursor: pointer;
+      padding: 4px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background-color 0.2s;
+    }
+    
+    .sidebar-close:hover {
+      background-color: rgba(255, 255, 255, 0.1);
+    }
+    
+    .sidebar-close svg {
+      width: 20px;
+      height: 20px;
+    }
+    
+    .sidebar-search {
+      padding: 12px 16px;
+      background-color: #232834;
+      border-bottom: 1px solid #3B4252;
+    }
+    
+    .sidebar-search input {
+      width: 100%;
+      background-color: #343F54;
+      border: 1px solid #434C5E;
+      border-radius: 4px;
+      color: #E5E9F0;
+      padding: 8px 12px;
+      font-size: 13px;
+      box-sizing: border-box;
+    }
+    
+    .sidebar-search input:focus {
+      outline: none;
+      border-color: #5E81AC;
+      box-shadow: 0 0 0 2px rgba(94, 129, 172, 0.3);
+    }
+    
+    .sidebar-search input::placeholder {
+      color: #6B7A8F;
+    }
+    
+    #session-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px;
+    }
+    
+    .session-item {
+      background-color: #232834;
+      border: 1px solid #3B4252;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    
+    .session-item:hover {
+      background-color: #2A3240;
+      border-color: #5E81AC;
+      transform: translateY(-1px);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    }
+    
+    .session-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 6px;
+    }
+    
+    .session-title {
+      font-weight: 600;
+      font-size: 13px;
+      color: #E5E9F0;
+      flex: 1;
+    }
+    
+    .session-meta {
+      font-size: 11px;
+      color: #6B7A8F;
+      white-space: nowrap;
+      margin-left: 8px;
+    }
+    
+    .session-preview {
+      font-size: 12px;
+      color: #A0A8BD;
+      margin-bottom: 8px;
+      line-height: 1.4;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    
+    .session-info {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+      font-size: 11px;
+      color: #6B7A8F;
+    }
+    
+    .session-messages, .session-model {
+      background-color: #343F54;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+    
+    .session-actions {
+      display: flex;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    
+    .session-load-btn, .session-delete-btn {
+      flex: 1;
+      padding: 6px 10px;
+      border: none;
+      border-radius: 4px;
+      font-size: 12px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      transition: all 0.2s;
+    }
+    
+    .session-load-btn {
+      background-color: #5E81AC;
+      color: #E5E9F0;
+    }
+    
+    .session-load-btn:hover {
+      background-color: #81A1C1;
+    }
+    
+    .session-delete-btn {
+      background-color: #4C566A;
+      color: #E5E9F0;
+    }
+    
+    .session-delete-btn:hover {
+      background-color: #BF616A;
+    }
+    
+    .session-load-btn svg, .session-delete-btn svg {
+      width: 14px;
+      height: 14px;
+    }
+    
+    .no-sessions {
+      text-align: center;
+      padding: 40px 20px;
+      color: #6B7A8F;
+    }
+    
+    .no-sessions p {
+      margin: 8px 0;
+    }
+    
+    .no-sessions .hint {
+      font-size: 12px;
+      color: #5A6478;
+    }
+    
+    .sidebar-footer {
+      padding: 12px 16px;
+      background-color: #171C27;
+      border-top: 1px solid #3B4252;
+    }
+    
+    #storage-info {
+      font-size: 11px;
+      color: #6B7A8F;
+      text-align: center;
+    }
+    
+    .storage-stats {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
   </style>
   <!-- Marked.js for Markdown parsing -->
   <script src="./lib/marked.min.js"></script>
   <script type="module" src="./js/main.js"></script>
 </head>
 <body>
-  <div id="bar"><pear-ctrl></pear-ctrl></div>
+  <!-- History Browser Overlay -->
+  <div id="history-overlay"></div>
+  
+  <!-- History Browser Sidebar -->
+  <div id="history-sidebar">
+    <div class="sidebar-header">
+      <h2>Chat History</h2>
+      <button class="sidebar-close" id="history-close">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+    </div>
+    <div class="sidebar-search">
+      <input type="text" id="session-search" placeholder="Search sessions...">
+    </div>
+    <div id="session-list">
+      <!-- Sessions will be dynamically added here -->
+    </div>
+    <div class="sidebar-footer">
+      <div id="storage-info">
+        <div class="storage-stats">
+          <span>0 sessions</span>
+          <span>•</span>
+          <span>0 KB used</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <div id="bar">
+    <button id="history-toggle">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+        <polyline points="9 22 9 12 15 12 15 22"></polyline>
+      </svg>
+      History
+    </button>
+    <pear-ctrl></pear-ctrl>
+  </div>
   
   <!-- Join Session UI -->
   <div id="join-section">
@@ -652,6 +986,25 @@
           <path d="M1 20v-6h6"></path>
           <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"></path>
           <path d="M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+        </svg>
+      </button>
+    </div>
+    <div class="model-control" style="border-top: 1px solid #3B4252; padding-top: 8px; margin-top: 8px;">
+      <label style="display: flex; align-items: center; cursor: pointer; user-select: none;">
+        <input type="checkbox" id="persistence-enabled" checked style="margin-right: 6px; cursor: pointer;">
+        <span>Save History</span>
+      </label>
+      <button type="button" id="export-history" title="Export chat history">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="7 10 12 15 17 10"></polyline>
+          <line x1="12" y1="15" x2="12" y2="3"></line>
+        </svg>
+      </button>
+      <button type="button" id="clear-history" title="Clear chat history">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="3 6 5 6 21 6"></polyline>
+          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
         </svg>
       </button>
     </div>

@@ -3,6 +3,7 @@
  * Contains functions for managing the chat history
  */
 import { updateChatDisplay } from '../ui/rendering.js';
+import { ChatPersistence } from './persistence.js';
 
 // Chat history array to store all messages
 let chatHistory = [];
@@ -13,17 +14,42 @@ let activeRequests = new Map();
 // Current active request ID
 let activeRequestId = null;
 
+// Persistence instance
+let persistence = null;
+
+// Persistence enabled flag
+let persistenceEnabled = true;
+
 /**
  * Add a message to the chat history
  * @param {Object} message - The message to add
  */
-function addToChatHistory(message) {
+async function addToChatHistory(message) {
   // Generate requestId if not present and it's a user message
   if (message.type === 'user' && !message.requestId) {
     message.requestId = generateRequestId();
   }
+
+  // Add timestamp if not present
+  if (!message.timestamp) {
+    message.timestamp = Date.now();
+  }
+
+  // Add unique ID if not present
+  if (!message.id) {
+    message.id = generateRequestId();
+  }
   
   chatHistory.push(message);
+  
+  // Save to persistence if enabled
+  if (persistence && persistence.isReady()) {
+    try {
+      await persistence.saveMessage(message);
+    } catch (error) {
+      console.error('[History] Failed to persist message:', error);
+    }
+  }
   
   // Keep chat history at a reasonable size
   const MAX_HISTORY = 100;

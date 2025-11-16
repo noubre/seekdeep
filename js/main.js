@@ -5,6 +5,7 @@
 import * as ui from './ui/elements.js';
 // import * as rendering from './ui/rendering.js';
 import * as events from './ui/events.js';
+import * as historyBrowser from './ui/history-browser.js';
 import * as hyperswarm from './network/hyperswarm.js';
 // import * as messaging from './network/messaging.js';
 // import * as ollama from './llm/ollama.js';
@@ -14,6 +15,7 @@ import * as provider from './llm/provider.js';
 // import * as formatting from './messages/formatting.js';
 import * as modes from './session/modes.js';
 // import * as peers from './session/peers.js';
+import * as persistenceManager from './messages/persistence-manager.js';
 
 // Initialize the application
 function initializeApp() {
@@ -22,6 +24,9 @@ function initializeApp() {
   // Initialize UI elements
   ui.initializeElements();
   ui.initializeCopyButton();
+  
+  // Initialize history browser
+  historyBrowser.initializeHistoryBrowser();
   
   // Initialize network
   hyperswarm.initializeSwarm();
@@ -35,6 +40,24 @@ function initializeApp() {
   // Update topic display when network state changes
   document.addEventListener('swarmTopicChanged', updateTopic);
   updateTopic(); // Initial update
+  
+  // Initialize persistence when topic changes
+  document.addEventListener('swarmTopicChanged', async () => {
+    const topic = hyperswarm.getTopicHex();
+    if (topic) {
+      console.log('[Main] Initializing persistence for topic:', topic);
+      try {
+        const success = await persistenceManager.initializePersistence(topic, {
+          autoLoad: true // Load previous messages if they exist
+        });
+        if (success) {
+          console.log('[Main] Persistence initialized successfully');
+        }
+      } catch (error) {
+        console.error('[Main] Failed to initialize persistence:', error);
+      }
+    }
+  });
   
   // Initialize LLM provider system
   provider.autoSelectProvider().then(selectedProvider => {

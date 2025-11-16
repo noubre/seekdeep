@@ -24,11 +24,52 @@ import { joinExistingChat } from '../network/hyperswarm.js';
 import { isSessionHost } from '../session/modes.js';
 import { fetchAvailableModels, requestModelsFromHost } from '../llm/models.js';
 import { ask, setCurrentProvider } from '../llm/provider.js';
+import * as persistenceManager from '../messages/persistence-manager.js';
+import * as historyBrowser from './history-browser.js';
 
 /**
  * Set up all event listeners for the UI
  */
 function setupEventListeners() {
+  // History browser handlers
+  const historyToggle = document.getElementById('history-toggle');
+  const historyClose = document.getElementById('history-close');
+  const historyOverlay = document.getElementById('history-overlay');
+  const sessionSearch = document.getElementById('session-search');
+  
+  if (historyToggle) {
+    historyToggle.addEventListener('click', handleHistoryToggle);
+  }
+  
+  if (historyClose) {
+    historyClose.addEventListener('click', handleHistoryToggle);
+  }
+  
+  if (historyOverlay) {
+    historyOverlay.addEventListener('click', handleHistoryToggle);
+  }
+  
+  if (sessionSearch) {
+    sessionSearch.addEventListener('input', handleSessionSearch);
+  }
+  
+  // Persistence control handlers
+  const persistenceCheckbox = document.getElementById('persistence-enabled');
+  const exportButton = document.getElementById('export-history');
+  const clearButton = document.getElementById('clear-history');
+  
+  if (persistenceCheckbox) {
+    persistenceCheckbox.addEventListener('change', handlePersistenceToggle);
+  }
+  
+  if (exportButton) {
+    exportButton.addEventListener('click', handleExportHistory);
+  }
+  
+  if (clearButton) {
+    clearButton.addEventListener('click', handleClearHistory);
+  }
+  
   // Form submission handler
   if (form) {
     form.addEventListener('submit', handleFormSubmit);
@@ -230,6 +271,85 @@ function handleRefreshModelsClick() {
     });
 }
 
+/**
+ * Handle persistence toggle checkbox
+ * @param {Event} event - The change event
+ */
+function handlePersistenceToggle(event) {
+  const enabled = event.target.checked;
+  persistenceManager.setPersistenceEnabled(enabled);
+  
+  addToChatHistory({
+    type: 'system',
+    content: `💾 Chat history persistence ${enabled ? 'enabled' : 'disabled'}`
+  });
+}
+
+/**
+ * Handle export history button click
+ */
+async function handleExportHistory() {
+  try {
+    const success = await persistenceManager.downloadSessionExport();
+    if (!success) {
+      addToChatHistory({
+        type: 'system',
+        content: '⚠️ Failed to export chat history'
+      });
+    }
+  } catch (error) {
+    console.error('Export error:', error);
+    addToChatHistory({
+      type: 'system',
+      content: `⚠️ Error exporting history: ${error.message}`
+    });
+  }
+}
+
+/**
+ * Handle clear history button click
+ */
+async function handleClearHistory() {
+  // Confirm with user
+  const confirmed = confirm('Are you sure you want to clear all saved chat history? This cannot be undone.');
+  
+  if (!confirmed) {
+    return;
+  }
+  
+  try {
+    const success = await persistenceManager.clearPersistedMessages();
+    if (!success) {
+      addToChatHistory({
+        type: 'system',
+        content: '⚠️ Failed to clear chat history' 
+      });
+    }
+  } catch (error) {
+    console.error('Clear error:', error);
+    addToChatHistory({
+      type: 'system',
+      content: `⚠️ Error clearing history: ${error.message}`
+    });
+  }
+}
+
+/**
+ * Handle history browser toggle
+ */
+function handleHistoryToggle() {
+  historyBrowser.toggleHistoryBrowser();
+}
+
+/**
+ * Handle session search input
+ * @param {Event} event - The input event
+ */
+function handleSessionSearch(event) {
+  const query = event.target.value;
+  historyBrowser.handleSessionSearch(query);
+}
+
 // Export functions
 export {
   setupEventListeners,
@@ -238,5 +358,10 @@ export {
   handleJoinButtonClick,
   handleTopicKeyInputKeydown,
   handleProviderChange,
-  handleRefreshModelsClick
+  handleRefreshModelsClick,
+  handlePersistenceToggle,
+  handleExportHistory,
+  handleClearHistory,
+  handleHistoryToggle,
+  handleSessionSearch
 };
