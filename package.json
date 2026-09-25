@@ -34,6 +34,7 @@
   },
   "files": [
     "index.js",
+    "index.html",
     "server.js",
     "js/",
     "css/",
