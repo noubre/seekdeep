@@ -1,98 +1,61 @@
 /**
- * Main entry point for the SeekDeep application
- * Initializes all modules and bootstraps the application
+ * Renderer entry point. The renderer is a view/controller only: all P2P and
+ * provider work happens in the Bare worker; this module boots the UI, the chat
+ * client, and fans worker events into the message store and client state.
  */
 import * as ui from './ui/elements.js';
-// import * as rendering from './ui/rendering.js';
 import * as events from './ui/events.js';
 import { initializeComposerDiscovery } from './ui/composer-discovery.js';
 import * as historyBrowser from './ui/history-browser.js';
-import * as hyperswarm from './network/hyperswarm.js';
-// import * as messaging from './network/messaging.js';
-// import * as ollama from './llm/ollama.js';
-import * as models from './llm/models.js';
-import * as provider from './llm/provider.js';
-// import * as history from './messages/history.js';
-// import * as formatting from './messages/formatting.js';
-import * as modes from './session/modes.js';
-// import * as peers from './session/peers.js';
-import * as persistenceManager from './messages/persistence-manager.js';
-import { parseBootstrapArgs } from './network/bootstrap-args.js';
+import { initializeChatClient } from './chat-client.js';
+import { clientState } from './session/client-state.js';
+import { initializeRendering } from './ui/rendering.js';
+import { addMessage, notify, findLastMessageByRequestId } from './messages/store.js';
 
-// Initialize the application
+function applyResponse(event) {
+  const { requestId, chunk, done } = event;
+  let message = findLastMessageByRequestId(requestId, 'assistant');
+  if (!message) {
+    message = addMessage({ type: 'assistant', content: '', rawContent: '', requestId });
+  }
+  if (chunk) {
+    message.rawContent = (message.rawContent || '') + chunk;
+    message.content = message.rawContent;
+  }
+  if (done) message.isComplete = true;
+  notify();
+}
+
 function initializeApp() {
   console.log('Initializing SeekDeep application...');
-  
-  // Initialize UI elements
+
   ui.initializeElements();
   ui.initializeCopyButton();
   initializeComposerDiscovery();
-  
-  // Initialize history browser
   historyBrowser.initializeHistoryBrowser();
-  
-  // Initialize network
-  const bootstrap = parseBootstrapArgs(globalThis.Pear?.config?.args);
-  hyperswarm.initializeSwarm({ bootstrap });
-  if (bootstrap.length) {
-    console.log('[Main] Using local DHT bootstrap:', bootstrap.map((node) => `${node.host}:${node.port}`).join(', '));
-  }
-  
-  // Set up topic display updates
-  const updateTopic = () => {
-    const topicHex = hyperswarm.getTopicHex();
-    ui.updateTopicDisplay(topicHex);
-  };
-  
-  // Update topic display when network state changes
-  document.addEventListener('swarmTopicChanged', updateTopic);
-  updateTopic(); // Initial update
-  
-  // Initialize persistence when topic changes
-  document.addEventListener('swarmTopicChanged', async () => {
-    const topic = hyperswarm.getTopicHex();
-    if (topic) {
-      console.log('[Main] Initializing persistence for topic:', topic);
-      try {
-        const success = await persistenceManager.initializePersistence(topic, {
-          autoLoad: true // Load previous messages if they exist
-        });
-        if (success) {
-          console.log('[Main] Persistence initialized successfully');
-        }
-      } catch (error) {
-        console.error('[Main] Failed to initialize persistence:', error);
-      }
+  initializeRendering();
+
+  const chatClient = initializeChatClient();
+  globalThis.seekdeep = { chatClient, clientState };
+
+  chatClient.onEvent((event) => {
+    clientState.applyEvent(event);
+    if (event.type === 'message' && event.message) {
+      addMessage(event.message);
+    } else if (event.type === 'response') {
+      applyResponse(event);
     }
   });
-  
-  // Initialize LLM provider system
-  provider.autoSelectProvider().then(selectedProvider => {
-    console.log(`Auto-selected provider: ${selectedProvider}`);
-    ui.setSelectedProvider(selectedProvider);
-  }).catch(err => {
-    console.warn('Failed to auto-select provider:', err);
+
+  events.setupEventListeners({ chatClient, clientState });
+
+  chatClient.api.create().catch((error) => {
+    console.warn('Failed to create chat session:', error.message);
   });
-  
-  // Initialize LLM
-  models.fetchAvailableModels();
-  
-  // Initialize session
-  modes.initializeChatMode();
-  
-  // Start a new chat session by default
-  hyperswarm.initializeNewChat();
-  
-  // Set up event listeners
-  events.setupEventListeners();
-  
+
   console.log('SeekDeep application initialized successfully');
 }
 
-// Initialize the application when the DOM is fully loaded
 document.addEventListener('DOMContentLoaded', initializeApp);
 
-// Export functions that need to be accessed globally
-export {
-  initializeApp
-};
+export { initializeApp, applyResponse };

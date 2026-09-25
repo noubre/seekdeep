@@ -1,7 +1,7 @@
 import test from 'brittle';
 import { Duplex } from 'node:stream';
-import { createJsonRpcServer, createResourceRpcMethods } from '../js/p2p/drive-rpc-server.js';
-import { createDriveRpcClient } from '../js/p2p/drive-rpc-client.js';
+import { createJsonRpcServer, createResourceRpcMethods } from '../js/p2p/rpc-server.js';
+import { createRpcClient } from '../js/p2p/rpc-client.js';
 import { createBeamService as createBeamRpcService } from '../js/slash/services/beam.js';
 
 function duplexPair() {
@@ -25,7 +25,7 @@ test('beam RPC exposes only JSON-safe lifecycle methods with strict validation',
   };
   const [clientPipe, serverPipe] = duplexPair();
   const server = createJsonRpcServer(serverPipe, createResourceRpcMethods({ drive: {}, localdrive: {}, beam }));
-  const client = createDriveRpcClient({ pipeFactory: () => clientPipe, timeout: 1000 });
+  const client = createRpcClient({ pipeFactory: () => clientPipe, timeout: 1000 });
   t.teardown(async () => { client.close(); await server.close(); });
   const adapter = createBeamRpcService(client);
 

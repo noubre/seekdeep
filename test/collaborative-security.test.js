@@ -10,18 +10,22 @@ global.document = dom.window.document;
 global.NodeFilter = dom.window.NodeFilter;
 global.CustomEvent = dom.window.CustomEvent;
 
-const modes = await import('../js/session/modes.js');
+const clientStateModule = await import('../js/session/client-state.js');
 const formatting = await import('../js/messages/formatting.js');
 
-test('collaborative mode can be enabled and disabled', function (t) {
-  modes.initializeChatMode();
-  t.is(modes.getCollaborativeMode(), false, 'starts in private mode');
+test('collaborative mode is tracked from chat events', function (t) {
+  const state = clientStateModule.createClientState();
+  t.is(state.getState().collaborative, false, 'starts in private mode');
 
-  modes.setCollaborativeMode(true);
-  t.is(modes.getCollaborativeMode(), true, 'collaborative mode can be enabled');
+  let observed = null;
+  state.subscribe((next) => { observed = next; });
 
-  modes.setCollaborativeMode(false);
-  t.is(modes.getCollaborativeMode(), false, 'collaborative mode can be disabled');
+  state.applyEvent({ type: 'mode', collaborative: true });
+  t.is(state.getState().collaborative, true, 'collaborative mode can be enabled');
+  t.is(observed.collaborative, true, 'subscribers are notified');
+
+  state.applyEvent({ type: 'mode', collaborative: false });
+  t.is(state.getState().collaborative, false, 'collaborative mode can be disabled');
 });
 
 test('renderMarkdown sanitizes dangerous peer/model HTML', function (t) {

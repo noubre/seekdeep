@@ -3,7 +3,7 @@
  * Manages the sidebar UI for browsing and loading past chat sessions
  */
 import { listSessions, loadSession, deleteSession, searchSessions, getStorageStats } from '../session/storage.js';
-import { addToChatHistory, clearChatHistory } from '../messages/history.js';
+import { addMessage, clear } from '../messages/store.js';
 
 // State
 let isHistoryBrowserOpen = false;
@@ -177,17 +177,17 @@ export async function handleSessionLoad(sessionId) {
   }
   
   // Clear current history
-  clearChatHistory();
+  clear();
   
   // Load messages from session
   if (sessionData.messages && Array.isArray(sessionData.messages)) {
     for (const message of sessionData.messages) {
-      await addToChatHistory(message);
+      await addMessage(message);
     }
   }
   
   // Add system message
-  await addToChatHistory({
+  await addMessage({
     type: 'system',
     content: `📂 Loaded session: ${sessionData.name || 'Untitled'} (${sessionData.messageCount || 0} messages)`,
     timestamp: Date.now()

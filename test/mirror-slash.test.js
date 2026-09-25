@@ -72,7 +72,7 @@ test('/mirror output rejects unsafe descriptor fields and stays local-only', asy
   const tag = await readFile(new URL('../js/slash/tags/mirror.js', import.meta.url), 'utf8');
   const adapter = await readFile(new URL('../js/slash/services/mirror.js', import.meta.url), 'utf8');
   const source = `${tag}\n${adapter}`;
-  for (const forbidden of ['mirror-drive', 'localdrive-service', 'hyperdrive-service', 'drive-runtime', '/network/', '/history', '/llm/', 'persistence-manager', "from 'fs'", "from 'path'"]) {
+  for (const forbidden of ['mirror-drive', 'localdrive-service', 'hyperdrive-service', 'worker-runtime', '/network/', '/history', '/llm/', 'persistence-manager', "from 'fs'", "from 'path'"]) {
     t.absent(source.includes(forbidden), forbidden);
   }
   t.absent(tag.includes('emitEphemeral'));

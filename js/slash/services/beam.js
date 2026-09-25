@@ -1,6 +1,6 @@
-import { driveRpcClient } from '../../p2p/drive-rpc-client.js';
+import { rpcClient } from '../../p2p/rpc-client.js';
 
-function createBeamService(client = driveRpcClient) {
+function createBeamService(client = rpcClient) {
   if (!client || typeof client.request !== 'function') throw new TypeError('Beam RPC client is required');
   return Object.freeze({
     create: (name) => client.request('beam.create', { name }),

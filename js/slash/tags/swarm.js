@@ -86,7 +86,7 @@ function peersResult(peers) {
   };
 }
 
-function handleSwarm(parsed, services) {
+async function handleSwarm(parsed, services) {
   const [requestedAction = 'status', ...args] = parsed.args;
   const action = requestedAction.toLowerCase();
 
@@ -100,11 +100,11 @@ function handleSwarm(parsed, services) {
   }
 
   const swarm = requireSwarmService(services);
-  if (action === 'status') return statusResult(swarm.status());
-  if (action === 'peers') return peersResult(swarm.peers());
-  if (action === 'create') return lifecycleResult(action, swarm.create());
-  if (action === 'join') return lifecycleResult(action, swarm.join(args[0]));
-  return lifecycleResult(action, swarm.leave());
+  if (action === 'status') return statusResult(await swarm.status());
+  if (action === 'peers') return peersResult(await swarm.peers());
+  if (action === 'create') return lifecycleResult(action, await swarm.create());
+  if (action === 'join') return lifecycleResult(action, await swarm.join(args[0]));
+  return lifecycleResult(action, await swarm.leave());
 }
 
 export { handleSwarm };

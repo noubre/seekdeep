@@ -3,7 +3,8 @@ import { createHyperdriveService } from './hyperdrive-service.js';
 import { createLocaldriveService } from './localdrive-service.js';
 import { createMirrorService } from './mirror-service.js';
 import { createBeamService } from './beam-service.js';
-import { createResourceRpcMethods, createJsonRpcServer } from './drive-rpc-server.js';
+import { createChatService } from './chat-service.js';
+import { createResourceRpcMethods, createJsonRpcServer } from './rpc-server.js';
 
 const DRIVE_STORAGE_DIRECTORY = 'seekdeep-hyperdrives-v1';
 const LOCALDRIVE_STORAGE_DIRECTORY = 'seekdeep-localdrives-v1';
@@ -55,7 +56,7 @@ function unavailableBeamService() {
   return Object.freeze({ create: unavailable, join: unavailable, list: unavailable, status: unavailable, send: unavailable, receive: unavailable, closeBeam: unavailable, close: async () => {} });
 }
 
-function createDriveBackend(pipe, options = {}) {
+function createWorkerBackend(pipe, options = {}) {
   if (!pipe || typeof pipe.on !== 'function' || typeof pipe.write !== 'function') throw new TypeError('Runtime pipe must be duplex');
   const service = options.service || createHyperdriveService({
     storageRoot: options.storageRoot || resolveDriveStorageRoot(options.config),
@@ -88,7 +89,26 @@ function createDriveBackend(pipe, options = {}) {
         maxPendingMessages: options.maxBeamPendingMessages,
         maxBufferBytes: options.maxBeamBufferBytes
       }));
-  const rpc = createJsonRpcServer(pipe, createResourceRpcMethods({ drive: service, localdrive: localdriveService, mirror: mirrorService, beam: beamService }), options.rpcOptions);
+  const chatService = options.chatService || (options.providers
+    ? createChatService({
+        providers: options.providers,
+        swarmFactory: options.swarmFactory,
+        bootstrap: options.bootstrap,
+        now: options.now,
+        maxPeers: options.maxChatPeers
+      })
+    : null);
+  const rpc = createJsonRpcServer(
+    pipe,
+    createResourceRpcMethods({ drive: service, localdrive: localdriveService, mirror: mirrorService, beam: beamService, chat: chatService }),
+    options.rpcOptions
+  );
+  if (chatService) {
+    chatService.onEvent((event) => {
+      const { type, ...data } = event;
+      rpc.notify('chat.event', { type, ...data }).catch(() => {});
+    });
+  }
   let closing = null;
 
   return Object.freeze({
@@ -96,6 +116,7 @@ function createDriveBackend(pipe, options = {}) {
     localdriveService,
     mirrorService,
     beamService,
+    chatService,
     rpc,
     close() {
       if (closing) return closing;
@@ -104,6 +125,7 @@ function createDriveBackend(pipe, options = {}) {
         try { await rpc.close(); } catch (error) { errors.push(error); }
         try { await mirrorService.close(); } catch (error) { errors.push(error); }
         try { await beamService.close(); } catch (error) { errors.push(error); }
+        if (chatService) { try { await chatService.close(); } catch (error) { errors.push(error); } }
         try { await service.close(); } catch (error) { errors.push(error); }
         try { await localdriveService.close(); } catch (error) { errors.push(error); }
         if (errors.length) throw new AggregateError(errors, 'Drive backend shutdown failed');
@@ -118,5 +140,5 @@ export {
   LOCALDRIVE_STORAGE_DIRECTORY,
   resolveDriveStorageRoot,
   resolveLocaldriveStorageRoot,
-  createDriveBackend
+  createWorkerBackend
 };

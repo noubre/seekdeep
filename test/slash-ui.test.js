@@ -4,15 +4,11 @@ import { JSDOM } from 'jsdom';
 import { dispatchSlashTag } from '../js/slash/registry.js';
 import { initializeComposerDiscovery } from '../js/ui/composer-discovery.js';
 
-import {
-  addToChatHistory,
-  clearChatHistory,
-  getChatHistory
-} from '../js/messages/history.js';
+import { addMessage, clear, getHistory } from '../js/messages/store.js';
 import { routePromptSubmission } from '../js/ui/submit-routing.js';
 import { createEphemeralRenderer } from '../js/ui/ephemeral.js';
 import { initializeElements } from '../js/ui/elements.js';
-import { updateChatDisplay } from '../js/ui/rendering.js';
+import { updateChatDisplay, initializeRendering } from '../js/ui/rendering.js';
 
 function createDom() {
   return new JSDOM('<!doctype html><div id="chat-messages"></div>', {
@@ -28,7 +24,8 @@ function installDom(dom) {
     return 1;
   };
   initializeElements();
-  clearChatHistory();
+  clear();
+  initializeRendering();
 }
 
 test('composer discovers current and upcoming slash commands accessibly', function (t) {
@@ -41,8 +38,8 @@ test('composer discovers current and upcoming slash commands accessibly', functi
   const hint = document.getElementById('slash-command-hint');
   let submitCount = 0;
 
-  clearChatHistory();
-  const historyLength = getChatHistory().length;
+  clear();
+  const historyLength = getHistory().length;
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     submitCount += 1;
@@ -70,7 +67,7 @@ test('composer discovers current and upcoming slash commands accessibly', functi
   t.is(prompt.value, '/p2p help', 'click fills the help command without running it');
   t.is(document.activeElement, prompt, 'click returns focus to the prompt');
   t.is(submitCount, 0, 'click does not dispatch the form');
-  t.is(getChatHistory().length, historyLength, 'click does not write chat or LLM history');
+  t.is(getHistory().length, historyLength, 'click does not write chat or LLM history');
 });
 
 test('slash submission renders locally without model, history, or service effects', async function (t) {
@@ -85,7 +82,7 @@ test('slash submission renders locally without model, history, or service effect
       throw new Error(`unexpected slash service access: ${String(property)}`);
     }
   });
-  const historyLength = getChatHistory().length;
+  const historyLength = getHistory().length;
 
   const result = await routePromptSubmission('/p2p help', {
     dispatchSlashTag,
@@ -104,7 +101,7 @@ test('slash submission renders locally without model, history, or service effect
   t.is(result, 'slash');
   t.alike(calls, { model: 0, ask: 0 }, 'slash bypasses model selection and ask');
   t.alike(serviceAccesses, [], 'slash does not touch persistence, broadcast, or peer services');
-  t.is(getChatHistory().length, historyLength, 'slash output is absent from chat history');
+  t.is(getHistory().length, historyLength, 'slash output is absent from chat history');
 
   const output = chatMessagesEl.querySelector('.message-ephemeral');
   t.ok(output, 'ephemeral output is appended to the chat DOM');
@@ -167,18 +164,18 @@ test('updateChatDisplay preserves slash chronology and its persistent live log',
   const emitEphemeral = createEphemeralRenderer(chatMessagesEl);
   const liveLog = chatMessagesEl;
 
-  await addToChatHistory({ type: 'user', content: 'before slash' });
+  await addMessage({ type: 'user', content: 'before slash' });
   const firstSlash = emitEphemeral('first local output', { kind: 'slash-help', command: 'p2p' });
   const secondSlash = emitEphemeral('second local output', { kind: 'slash-placeholder', command: 'dht' });
-  const historyLengthAfterSlashes = getChatHistory().length;
-  await addToChatHistory({ type: 'user', content: 'after slash' });
+  const historyLengthAfterSlashes = getHistory().length;
+  await addMessage({ type: 'user', content: 'after slash' });
   const streamingMessage = {
     type: 'assistant',
     content: 'stream start',
     rawContent: 'stream start',
     requestId: 'streaming-after-slash'
   };
-  await addToChatHistory(streamingMessage);
+  await addMessage(streamingMessage);
   streamingMessage.content = 'stream complete';
   streamingMessage.rawContent = 'stream complete';
   updateChatDisplay();
@@ -199,9 +196,9 @@ test('updateChatDisplay preserves slash chronology and its persistent live log',
   t.is(liveLog.getAttribute('aria-live'), 'polite');
   t.ok(liveLog.isConnected, 'the live region remains attached');
   t.is(historyLengthAfterSlashes, 1, 'slash results never enter history');
-  t.is(getChatHistory().length, 3, 'only normal messages enter history');
+  t.is(getHistory().length, 3, 'only normal messages enter history');
 
-  clearChatHistory();
+  clear();
 });
 
 test('ephemeral chronology survives history retention truncation', async function (t) {
@@ -211,26 +208,26 @@ test('ephemeral chronology survives history retention truncation', async functio
   const emitEphemeral = createEphemeralRenderer(chatMessagesEl);
 
   for (let index = 1; index <= 100; index += 1) {
-    await addToChatHistory({ type: 'user', content: `normal ${index}` });
+    await addMessage({ type: 'user', content: `normal ${index}` });
   }
 
   const slash = emitEphemeral('local at retention edge', {
     kind: 'slash-help',
     command: 'p2p'
   });
-  await addToChatHistory({ type: 'user', content: 'normal 101' });
+  await addMessage({ type: 'user', content: 'normal 101' });
   updateChatDisplay(true);
 
   const messages = Array.from(chatMessagesEl.querySelectorAll(':scope > .message'));
   const slashIndex = messages.indexOf(slash);
   const lastOldIndex = messages.findIndex((node) => node.textContent === 'Younormal 100');
   const newIndex = messages.findIndex((node) => node.textContent === 'Younormal 101');
-  t.is(getChatHistory().length, 100, 'history retains its configured maximum');
+  t.is(getHistory().length, 100, 'history retains its configured maximum');
   t.ok(lastOldIndex < slashIndex, 'slash remains after its retained predecessor');
   t.ok(slashIndex < newIndex, 'slash remains before the message that caused truncation');
   t.is(messages[slashIndex], slash, 'slash DOM node identity survives the full render');
 
-  clearChatHistory();
+  clear();
 });
 
 test('ephemeral chronology stays before retained successors after its anchor is evicted', async function (t) {
@@ -239,11 +236,11 @@ test('ephemeral chronology stays before retained successors after its anchor is 
   const chatMessagesEl = dom.window.document.getElementById('chat-messages');
   const emitEphemeral = createEphemeralRenderer(chatMessagesEl);
 
-  await addToChatHistory({ type: 'user', content: 'eventual evicted anchor' });
+  await addMessage({ type: 'user', content: 'eventual evicted anchor' });
   const firstSlash = emitEphemeral('first local output', { command: 'p2p' });
   const secondSlash = emitEphemeral('second local output', { command: 'dht' });
   for (let index = 1; index <= 100; index += 1) {
-    await addToChatHistory({ type: 'user', content: `later ${index}` });
+    await addMessage({ type: 'user', content: `later ${index}` });
   }
   updateChatDisplay(true);
 
@@ -253,7 +250,7 @@ test('ephemeral chronology stays before retained successors after its anchor is 
   t.is(messages[2].textContent, 'Youlater 1', 'oldest retained successor follows local output');
   t.is(messages.at(-1).textContent, 'Youlater 100');
 
-  clearChatHistory();
+  clear();
 });
 
 test('multiple ephemeral outputs from empty history precede the first normal message', async function (t) {
@@ -264,7 +261,7 @@ test('multiple ephemeral outputs from empty history precede the first normal mes
 
   const firstSlash = emitEphemeral('first empty-history output', { command: 'p2p' });
   const secondSlash = emitEphemeral('second empty-history output', { command: 'dht' });
-  await addToChatHistory({ type: 'user', content: 'first normal message' });
+  await addMessage({ type: 'user', content: 'first normal message' });
   updateChatDisplay(true);
 
   const messages = Array.from(chatMessagesEl.querySelectorAll(':scope > .message'));
@@ -273,7 +270,7 @@ test('multiple ephemeral outputs from empty history precede the first normal mes
   t.is(messages[1], secondSlash, 'local outputs keep emission order');
   t.is(messages[2].textContent, 'Youfirst normal message');
 
-  clearChatHistory();
+  clear();
 });
 
 test('updateChatDisplay restores a scrolled-up visible message after reconciliation', async function (t) {
@@ -287,7 +284,7 @@ test('updateChatDisplay restores a scrolled-up visible message after reconciliat
     { id: 'scroll-4', type: 'user', content: 'four' }
   ];
 
-  for (const message of messages) await addToChatHistory(message);
+  for (const message of messages) await addMessage(message);
 
   let scrollTop = 150;
   Object.defineProperties(chatMessagesEl, {
@@ -333,7 +330,7 @@ test('updateChatDisplay restores a scrolled-up visible message after reconciliat
   updateChatDisplay(true);
   t.is(scrollTop, 400, 'a reader near the bottom follows a full reconciliation');
 
-  clearChatHistory();
+  clear();
 });
 
 test('ephemeral appends respect the near-bottom scroll policy', function (t) {

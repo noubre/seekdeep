@@ -1,63 +1,12 @@
 import test from 'brittle';
 import { dispatchSlashTag } from '../js/slash/registry.js';
-import { createSwarmService, swarmService } from '../js/slash/services/swarm.js';
-import {
-  initializeSwarm,
-  initializeNewChat,
-  joinExistingChat,
-  leaveExistingChat,
-  getTopicHex,
-  getConnections
-} from '../js/network/hyperswarm.js';
-import { clearChatHistory, getChatHistory } from '../js/messages/history.js';
-import { isSessionHost } from '../js/session/modes.js';
+import { createSwarmService } from '../js/slash/services/swarm.js';
 
 const TOPIC = 'ab'.repeat(32);
 
-function fakeNetwork(joinBehavior = () => ({ destroy() {} })) {
-  const calls = [];
-  const discoveries = [];
-  const handlers = new Map();
-  return {
-    calls,
-    discoveries,
-    keyPair: { publicKey: new Uint8Array(32) },
-    on(event, handler) {
-      calls.push(['on', event]);
-      handlers.set(event, handler);
-    },
-    emit(event, value) { handlers.get(event)?.(value); },
-    join(topic) {
-      calls.push(['join', Buffer.from(topic).toString('hex')]);
-      const result = joinBehavior(topic, discoveries.length);
-      if (result) discoveries.push(result);
-      return result;
-    },
-    leave(topic) { calls.push(['leave', Buffer.from(topic).toString('hex')]); }
-  };
-}
-
-function collector() {
-  const output = [];
-  return {
-    output,
-    ctx: {
-      emitEphemeral(content, metadata) {
-        output.push({ content, metadata });
-      }
-    }
-  };
-}
-
 function fakeSwarm(overrides = {}) {
   const calls = [];
-  let state = {
-    initialized: true,
-    topic: TOPIC,
-    role: 'host',
-    connected: true,
-    peerCount: 1
-  };
+  let state = { initialized: true, topic: TOPIC, role: 'host', connected: true, peerCount: 1 };
   const service = {
     calls,
     status() {
@@ -71,12 +20,12 @@ function fakeSwarm(overrides = {}) {
     },
     join(topic) {
       calls.push(['join', topic]);
-      state = { initialized: true, topic, role: 'joiner', connected: false, peerCount: 0 };
+      state = { initialized: true, topic, role: 'peer', connected: false, peerCount: 0 };
       return { ...state };
     },
     leave() {
       calls.push(['leave']);
-      state = { initialized: true, topic: null, role: 'none', connected: false, peerCount: 0 };
+      state = { initialized: false, topic: null, role: 'none', connected: false, peerCount: 0 };
       return { ...state };
     },
     peers() {
@@ -88,10 +37,31 @@ function fakeSwarm(overrides = {}) {
   return service;
 }
 
+function collector() {
+  const output = [];
+  return {
+    output,
+    ctx: { emitEphemeral(content, metadata) { output.push({ content, metadata }); } }
+  };
+}
+
 async function dispatch(input, swarm = fakeSwarm()) {
   const result = collector();
   await dispatchSlashTag(input, result.ctx, { swarm });
   return { ...result, swarm };
+}
+
+function fakeClient(handlers) {
+  const calls = [];
+  return {
+    calls,
+    async request(method, params) {
+      calls.push([method, params]);
+      const handler = handlers[method];
+      if (handler === undefined) throw new Error(`unexpected ${method}`);
+      return typeof handler === 'function' ? handler(params) : handler;
+    }
+  };
 }
 
 test('/swarm defaults to status and reports honest inactive state', async function (t) {
@@ -171,185 +141,51 @@ test('/swarm service errors are caught by dispatch and remain local', async func
   }]);
 });
 
-test('swarm service adapter reports state without touching the public network', function (t) {
-  const calls = [];
-  const peers = new Map([
-    ['0123456789abcdef', { displayName: 'Alice', isHost: true, clientId: 'secret-client-key', colorClass: 'secret-style' }],
-    ['fedcba9876543210', { displayName: 'Bob', isServer: false, privateKey: 'must-not-leak' }]
-  ]);
-  const service = createSwarmService({
-    initializeNewChat(options) { calls.push(['create', options]); },
-    joinExistingChat(topic, options) { calls.push(['join', topic, options]); return true; },
-    leaveExistingChat() { calls.push(['leave']); },
-    isSwarmInitialized: () => true,
-    getTopicHex: () => TOPIC,
-    isConnectedToPeers: () => true,
-    isSessionHost: () => true,
-    getActivePeers: () => peers
+test('swarm service adapter maps worker RPC state and peers', async function (t) {
+  const client = fakeClient({
+    'chat.status': { initialized: true, topic: TOPIC, role: 'host', connected: true, peerCount: 2, publicKey: 'ab'.repeat(32) },
+    'chat.create': { topic: TOPIC, role: 'host' },
+    'chat.join': { topic: TOPIC, role: 'peer' },
+    'chat.leave': { topic: null, role: 'none' },
+    'chat.peers': { peers: [{ id: '0123456789abcdef', displayName: 'Alice', role: 'host' }, { id: 'fedcba9876543210', displayName: 'Bob', role: 'peer' }] }
   });
+  const service = createSwarmService(client);
 
-  t.alike(service.status(), {
-    initialized: true, topic: TOPIC, role: 'host', connected: true, peerCount: 2
-  });
-  t.alike(service.peers(), [
+  t.alike(await service.status(), { initialized: true, topic: TOPIC, role: 'host', connected: true, peerCount: 2 });
+  t.alike(await service.peers(), [
     { id: '01234567…', displayName: 'Alice', role: 'host' },
     { id: 'fedcba98…', displayName: 'Bob', role: 'peer' }
   ]);
-  t.alike(calls, [], 'read helpers cause no lifecycle operations');
-  t.alike(service.create(), {
-    initialized: true, topic: TOPIC, role: 'host', connected: true, peerCount: 2
-  });
-  t.alike(service.join(TOPIC), {
-    initialized: true, topic: TOPIC, role: 'host', connected: true, peerCount: 2
-  });
-  t.alike(service.leave(), {
-    initialized: true, topic: TOPIC, role: 'host', connected: true, peerCount: 2
-  });
-  t.alike(calls, [
-    ['create', { announce: false, notify: true }],
-    ['join', TOPIC, { announce: false, notify: true }],
-    ['leave']
-  ], 'slash lifecycle requests local state notification without legacy history output');
+  t.alike(await service.create(), { initialized: true, topic: TOPIC, role: 'host', connected: true, peerCount: 2 });
+  t.alike(await service.leave(), { initialized: true, topic: TOPIC, role: 'host', connected: true, peerCount: 2 });
+  t.alike(client.calls.map((call) => call[0]), ['chat.status', 'chat.peers', 'chat.create', 'chat.status', 'chat.leave', 'chat.status']);
 });
 
-test('swarm adapter is honest when uninitialized and converts failed joins to errors', function (t) {
-  const uninitialized = createSwarmService({
-    initializeNewChat() {}, joinExistingChat: () => true, leaveExistingChat() {},
-    isSwarmInitialized: () => false,
-    getTopicHex: () => null,
-    isConnectedToPeers: () => false,
-    isSessionHost: () => false,
-    getActivePeers: () => new Map()
-  });
-  t.alike(uninitialized.status(), {
-    initialized: false, topic: null, role: 'none', connected: false, peerCount: 0
-  });
+test('swarm adapter is honest when uninitialized and treats failed joins as errors', async function (t) {
+  const uninitialized = createSwarmService(fakeClient({
+    'chat.status': { initialized: false, topic: null, role: 'none', connected: false, peerCount: 0 }
+  }));
+  t.alike(await uninitialized.status(), { initialized: false, topic: null, role: 'none', connected: false, peerCount: 0 });
 
-  const failed = createSwarmService({
-    initializeNewChat() {}, joinExistingChat: () => false, leaveExistingChat() {},
-    isSwarmInitialized: () => true,
-    getTopicHex: () => null,
-    isConnectedToPeers: () => false,
-    isSessionHost: () => false,
-    getActivePeers: () => new Map()
-  });
-  t.exception(() => failed.join(TOPIC), /Failed to join swarm topic/);
+  const failed = createSwarmService(fakeClient({
+    'chat.join': () => { throw new Error('Failed to join swarm topic'); }
+  }));
+  await t.exception.all(() => failed.join(TOPIC), /Failed to join swarm topic/);
 });
 
-test('real slash lifecycle notifies local state without history or peer output', async function (t) {
-  const originalDocument = globalThis.document;
-  const eventTarget = new EventTarget();
-  globalThis.document = eventTarget;
-  t.teardown(() => {
-    leaveExistingChat({ announce: false, notify: false });
-    clearChatHistory();
-    globalThis.document = originalDocument;
-  });
-
-  const network = fakeNetwork();
-  initializeSwarm({ swarmFactory: () => network });
-  clearChatHistory();
-  const observedTopics = [];
-  eventTarget.addEventListener('swarmTopicChanged', () => {
-    observedTopics.push(getTopicHex());
-  });
-
-  const created = await dispatch('/swarm create', swarmService);
-  const createdTopic = created.output[0].metadata.topic;
-  const joined = await dispatch(`/swarm join ${TOPIC}`, swarmService);
-
-  t.alike(observedTopics, [createdTopic, TOPIC], 'slash create/join each publish the completed local topic transition');
-  t.is(getChatHistory().length, 0, 'slash create/join add no legacy history');
-  t.is(getTopicHex(), TOPIC, 'the requested room remains active locally');
-  t.is(network.calls.filter((call) => call[0] === 'join').length, 2, 'only lifecycle joins are sent to the network');
-  t.absent(network.calls.some((call) => JSON.stringify(call).includes('/swarm')), 'slash text and output are never sent to peers');
-  t.is(joined.output.length, 1, 'slash output remains a single local ephemeral result');
-
-  initializeNewChat();
-  t.is(observedTopics.length, 3, 'ordinary create still dispatches the lifecycle event');
-  t.is(getChatHistory().length, 1, 'ordinary create still records legacy history');
-  t.is(joinExistingChat(TOPIC), true);
-  t.is(observedTopics.length, 4, 'ordinary join still dispatches the lifecycle event');
-  t.is(getChatHistory().length, 2, 'ordinary join still records legacy history');
-});
-
-test('failed room transitions tear down the prior room and roll back all new state', function (t) {
-  const originalDocument = globalThis.document;
-  globalThis.document = new EventTarget();
-  t.teardown(() => {
-    leaveExistingChat({ announce: false });
-    clearChatHistory();
-    globalThis.document = originalDocument;
-  });
-
-  let destroyed = 0;
-  let connectionDestroyed = 0;
-  const connectionHandlers = new Map();
-  const partialConnection = {
-    remotePublicKey: new Uint8Array(32).fill(7),
-    on(event, handler) { connectionHandlers.set(event, handler); },
-    write() {},
-    destroy() { connectionDestroyed += 1; }
-  };
-  let network;
-  network = fakeNetwork((topic, attempt) => {
-    if (attempt === 0) return { destroy() { destroyed += 1; } };
-    network.emit('connection', partialConnection);
-    throw new Error('injected join failure');
-  });
-  initializeSwarm({ swarmFactory: () => network });
-  t.is(initializeNewChat({ announce: false }), true);
-  const priorTopic = getTopicHex();
-  t.is(isSessionHost(), true);
-
-  t.is(joinExistingChat(TOPIC, { announce: false }), false);
-  t.is(destroyed, 1, 'prior discovery handle is destroyed exactly once');
-  t.is(getTopicHex(), null, 'failed target is not shown as active');
-  t.is(isSessionHost(), false, 'failed target has no stale host/joiner mode');
-  t.alike(getConnections(), [], 'failed target retains no connections');
-  t.is(connectionDestroyed, 1, 'connection created during the failed transition is destroyed');
-  t.absent(network.calls.some((call) => call[0] === 'leave' && call[1] === priorTopic), 'destroying discovery avoids duplicate prior leave');
-  t.ok(network.calls.some((call) => call[0] === 'leave' && call[1] === TOPIC), 'partially joined target was left');
-});
-
-test('a falsy discovery result rolls create back and surfaces a slash error', async function (t) {
-  const originalDocument = globalThis.document;
-  globalThis.document = new EventTarget();
-  t.teardown(() => {
-    leaveExistingChat({ announce: false });
-    globalThis.document = originalDocument;
-  });
-
-  const network = fakeNetwork(() => null);
-  initializeSwarm({ swarmFactory: () => network });
-  const result = await dispatch('/swarm create', swarmService);
-
-  t.is(result.output[0].metadata.kind, 'slash-error');
-  t.is(getTopicHex(), null);
-  t.is(isSessionHost(), false);
-  t.alike(getConnections(), []);
-});
-
-test('swarm peer output sanitizes hostile names and caps abusive lists', function (t) {
-  const peers = new Map([
-    ['newline-peer-identifier', { displayName: 'Alice\nHost' }],
-    ['control-peer-identifier', { displayName: '\u0000Bob\u001b[31m\u202e\t Admin' }],
-    ['blank-peer-identifier', { displayName: '\n\u0000\t' }],
-    ['huge-peer-identifier', { displayName: `  ${'x'.repeat(200)}  ` }]
-  ]);
+test('swarm peer output sanitizes hostile names and caps abusive lists', async function (t) {
+  const peers = [
+    { id: 'newline-peer-identifier', displayName: 'Alice\nHost', role: 'peer' },
+    { id: 'control-peer-identifier', displayName: '\u0000Bob\u001b[31m\u202e\t Admin', role: 'peer' },
+    { id: 'blank-peer-identifier', displayName: '\n\u0000\t', role: 'peer' },
+    { id: 'huge-peer-identifier', displayName: `  ${'x'.repeat(200)}  `, role: 'peer' }
+  ];
   for (let index = 0; index < 100; index += 1) {
-    peers.set(`peer-${String(index).padStart(4, '0')}-private-suffix`, { displayName: `Peer ${index}` });
+    peers.push({ id: `peer-${String(index).padStart(4, '0')}-private-suffix`, displayName: `Peer ${index}`, role: 'peer' });
   }
 
-  const service = createSwarmService({
-    initializeNewChat() {}, joinExistingChat: () => true, leaveExistingChat() {},
-    isSwarmInitialized: () => true,
-    getTopicHex: () => TOPIC,
-    isConnectedToPeers: () => true,
-    isSessionHost: () => false,
-    getActivePeers: () => peers
-  });
-  const sanitized = service.peers();
+  const service = createSwarmService(fakeClient({ 'chat.peers': { peers } }));
+  const sanitized = await service.peers();
 
   t.is(sanitized.length, 50, 'peer list is bounded');
   t.is(sanitized[0].displayName, 'Alice Host', 'newlines cannot spoof rows');
@@ -360,10 +196,9 @@ test('swarm peer output sanitizes hostile names and caps abusive lists', functio
   t.ok(sanitized.every((peer) => peer.id.length <= 9), 'identifiers stay truncated');
 
   const output = collector();
-  return dispatchSlashTag('/swarm peers', output.ctx, { swarm: service }).then(() => {
-    t.is(output.output[0].metadata.peerCount, 50);
-    t.is(output.output[0].metadata.peers.length, 50);
-    t.is(output.output[0].content.split('\n').length, 51, 'rendered output has a bounded number of rows');
-    t.alike(JSON.parse(JSON.stringify(output.output[0])), output.output[0], 'bounded peer output remains JSON-safe');
-  });
+  await dispatchSlashTag('/swarm peers', output.ctx, { swarm: service });
+  t.is(output.output[0].metadata.peerCount, 50);
+  t.is(output.output[0].metadata.peers.length, 50);
+  t.is(output.output[0].content.split('\n').length, 51, 'rendered output has a bounded number of rows');
+  t.alike(JSON.parse(JSON.stringify(output.output[0])), output.output[0], 'bounded peer output remains JSON-safe');
 });

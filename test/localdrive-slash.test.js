@@ -94,7 +94,7 @@ test('/localdrive tag and adapter use only the injected RPC capability', async f
   const tag = await readFile(new URL('../js/slash/tags/localdrive.js', import.meta.url), 'utf8');
   const adapter = await readFile(new URL('../js/slash/services/localdrive.js', import.meta.url), 'utf8');
   const source = `${tag}\n${adapter}`;
-  for (const forbidden of ['localdrive-service', 'drive-runtime', '/network/', '/history', '/llm/', 'persistence-manager', "from 'fs'", "from 'path'"]) {
+  for (const forbidden of ['localdrive-service', 'worker-runtime', '/network/', '/history', '/llm/', 'persistence-manager', "from 'fs'", "from 'path'"]) {
     t.absent(source.includes(forbidden), forbidden);
   }
   t.absent(tag.includes('emitEphemeral'));

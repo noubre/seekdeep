@@ -1,11 +1,6 @@
 import test from 'brittle';
 import { dispatchSlashTag } from '../js/slash/registry.js';
 import { createDHTService } from '../js/slash/services/dht.js';
-import {
-  initializeSwarm,
-  leaveExistingChat,
-  getDHTDiagnostics
-} from '../js/network/hyperswarm.js';
 
 const PUBLIC_KEY = '12'.repeat(32);
 const TOPIC = 'ab'.repeat(32);
@@ -14,11 +9,7 @@ function collector() {
   const output = [];
   return {
     output,
-    ctx: {
-      emitEphemeral(content, metadata) {
-        output.push({ content, metadata });
-      }
-    }
+    ctx: { emitEphemeral(content, metadata) { output.push({ content, metadata }); } }
   };
 }
 
@@ -45,6 +36,18 @@ async function dispatch(input, dht = fakeDHT()) {
   const result = collector();
   await dispatchSlashTag(input, result.ctx, { dht });
   return { ...result, dht };
+}
+
+function fakeClient(status) {
+  const calls = [];
+  return {
+    calls,
+    async request(method, params) {
+      calls.push([method, params]);
+      if (method !== 'chat.status') throw new Error(`unexpected ${method}`);
+      return typeof status === 'function' ? status() : status;
+    }
+  };
 }
 
 test('/dht defaults to status and reports honest uninitialized state', async function (t) {
@@ -135,49 +138,44 @@ test('/dht validates subcommands before accessing the service', async function (
   }
 });
 
-test('DHT service adapter selects only safe stable diagnostics', function (t) {
+test('DHT service adapter selects only safe stable diagnostics from chat.status', async function (t) {
   const secret = 'ff'.repeat(64);
-  const service = createDHTService({
-    getDHTDiagnostics() {
-      return {
-        initialized: true,
-        publicKey: PUBLIC_KEY.toUpperCase(),
-        topic: TOPIC.toUpperCase(),
-        connectionCount: 3,
-        listening: true,
-        secretKey: secret,
-        peers: [{ publicKey: secret, address: '203.0.113.1:49737' }],
-        routingTable: [secret]
-      };
-    }
+  const client = fakeClient({
+    initialized: true,
+    publicKey: PUBLIC_KEY.toUpperCase(),
+    topic: TOPIC.toUpperCase(),
+    peerCount: 3,
+    listening: true,
+    secretKey: secret,
+    peers: [{ publicKey: secret, address: '203.0.113.1:49737' }],
+    routingTable: [secret]
   });
+  const service = createDHTService(client);
 
-  const status = service.status();
+  const status = await service.status();
   t.alike(status, {
     initialized: true,
     publicKey: PUBLIC_KEY,
     topic: TOPIC,
     connectionCount: 3,
-    listening: true
+    listening: null
   });
   const serialized = JSON.stringify(status);
   t.absent(serialized.includes(secret));
   t.absent(serialized.includes('203.0.113.1'));
   t.alike(JSON.parse(serialized), status);
+  t.alike(client.calls, [['chat.status', {}]]);
 });
 
-test('DHT service rejects malformed keys and normalizes unreliable state', function (t) {
-  const service = createDHTService({
-    getDHTDiagnostics: () => ({
-      initialized: true,
-      publicKey: 'not-a-key',
-      topic: 'also-not-a-topic',
-      connectionCount: -50,
-      listening: Promise.resolve()
-    })
-  });
+test('DHT service rejects malformed keys and normalizes unreliable state', async function (t) {
+  const service = createDHTService(fakeClient({
+    initialized: true,
+    publicKey: 'not-a-key',
+    topic: 'also-not-a-topic',
+    peerCount: -50
+  }));
 
-  t.alike(service.status(), {
+  t.alike(await service.status(), {
     initialized: true,
     publicKey: null,
     topic: null,
@@ -186,22 +184,11 @@ test('DHT service rejects malformed keys and normalizes unreliable state', funct
   });
 });
 
-test('Hyperswarm diagnostics use fake local state without public network access', function (t) {
-  const keyBytes = Uint8Array.from(Buffer.from(PUBLIC_KEY, 'hex'));
-  const fakeNetwork = {
-    keyPair: { publicKey: keyBytes, secretKey: new Uint8Array(64).fill(9) },
-    connections: new Set(),
-    listening: null,
-    on() {},
-    leave() {}
-  };
-
-  initializeSwarm({ swarmFactory: () => fakeNetwork });
-  t.teardown(() => leaveExistingChat({ announce: false }));
-
-  t.alike(getDHTDiagnostics(), {
-    initialized: true,
-    publicKey: PUBLIC_KEY,
+test('DHT service reports uninitialized state without leaking keys', async function (t) {
+  const service = createDHTService(fakeClient({ initialized: false, publicKey: PUBLIC_KEY, topic: TOPIC, peerCount: 4 }));
+  t.alike(await service.status(), {
+    initialized: false,
+    publicKey: null,
     topic: null,
     connectionCount: 0,
     listening: null

@@ -79,7 +79,7 @@ function nodesResult(state) {
   };
 }
 
-function handleDHT(parsed, services) {
+async function handleDHT(parsed, services) {
   const [requestedAction = 'status', ...args] = parsed.args;
   const action = requestedAction.toLowerCase();
 
@@ -87,7 +87,7 @@ function handleDHT(parsed, services) {
     throw new Error(`Unknown or invalid /dht action: ${requestedAction}. Use status, key, or nodes without extra arguments.`);
   }
 
-  const state = requireDHTService(services).status();
+  const state = await requireDHTService(services).status();
   if (action === 'status') return statusResult(state);
   if (action === 'key') return keyResult(state);
   return nodesResult(state);

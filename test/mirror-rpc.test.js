@@ -1,7 +1,7 @@
 import test from 'brittle';
 import { Duplex } from 'node:stream';
-import { createJsonRpcServer, createResourceRpcMethods } from '../js/p2p/drive-rpc-server.js';
-import { createDriveRpcClient } from '../js/p2p/drive-rpc-client.js';
+import { createJsonRpcServer, createResourceRpcMethods } from '../js/p2p/rpc-server.js';
+import { createRpcClient } from '../js/p2p/rpc-client.js';
 import { createMirrorService as createMirrorRpcService } from '../js/slash/services/mirror.js';
 
 function duplexPair() {
@@ -21,7 +21,7 @@ test('mirror RPC methods are exactly allowlisted and validated', async function 
   };
   const [clientPipe, serverPipe] = duplexPair();
   const server = createJsonRpcServer(serverPipe, createResourceRpcMethods({ drive: {}, localdrive: {}, mirror }));
-  const client = createDriveRpcClient({ pipeFactory: () => clientPipe, timeout: 1000 });
+  const client = createRpcClient({ pipeFactory: () => clientPipe, timeout: 1000 });
   t.teardown(async () => { client.close(); await server.close(); });
   const adapter = createMirrorRpcService(client);
 

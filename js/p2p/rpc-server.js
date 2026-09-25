@@ -5,6 +5,7 @@ const DEFAULT_MAX_AGGREGATE_BYTES = 512 * 1024;
 const DEFAULT_MAX_QUEUED_REQUESTS = 128;
 const MAX_ID_LENGTH = 64;
 const MIN_MESSAGE_BYTES = 128;
+const EVENT_PATTERN = /^[a-z][a-z0-9.-]{0,63}$/;
 
 function isPlainObject(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -166,13 +167,30 @@ function createBeamRpcMethods(service) {
   });
 }
 
+function createChatRpcMethods(service) {
+  if (!service || typeof service.methods !== 'object' || !service.methods) throw new TypeError('Chat service is required');
+  const call = (name) => (params) => service.methods[name](params);
+  return Object.freeze({
+    'chat.status': { validate(params) { assertPlainDataObject(params, []); return [{}]; }, invoke: call('chat.status') },
+    'chat.create': { validate(params) { const p = assertPlainDataObject(params, ['name']); return [{ name: optionalString(p, 'name') }]; }, invoke: call('chat.create') },
+    'chat.join': { validate(params) { const p = assertPlainDataObject(params, ['topic']); return [{ topic: requiredString(p, 'topic') }]; }, invoke: call('chat.join') },
+    'chat.leave': { validate(params) { assertPlainDataObject(params, []); return [{}]; }, invoke: call('chat.leave') },
+    'chat.peers': { validate(params) { assertPlainDataObject(params, []); return [{}]; }, invoke: call('chat.peers') },
+    'chat.send': { validate(params) { const p = assertPlainDataObject(params, ['prompt', 'model']); return [{ prompt: requiredString(p, 'prompt'), model: requiredString(p, 'model') }]; }, invoke: call('chat.send') },
+    'chat.setMode': { validate(params) { const p = assertPlainDataObject(params, ['collaborative']); return [{ collaborative: booleanValue(p, 'collaborative') }]; }, invoke: call('chat.setMode') },
+    'chat.refreshModels': { validate(params) { assertPlainDataObject(params, []); return [{}]; }, invoke: call('chat.refreshModels') },
+    'chat.setProvider': { validate(params) { const p = assertPlainDataObject(params, ['provider']); return [{ provider: requiredString(p, 'provider') }]; }, invoke: call('chat.setProvider') }
+  });
+}
+
 function createResourceRpcMethods(services) {
   if (!services || typeof services !== 'object' || Array.isArray(services)) throw new TypeError('Resource services are required');
   return Object.freeze({
     ...createDriveRpcMethods(services.drive),
     ...createLocaldriveRpcMethods(services.localdrive),
     ...(services.mirror ? createMirrorRpcMethods(services.mirror) : {}),
-    ...(services.beam ? createBeamRpcMethods(services.beam) : {})
+    ...(services.beam ? createBeamRpcMethods(services.beam) : {}),
+    ...(services.chat ? createChatRpcMethods(services.chat) : {})
   });
 }
 
@@ -294,7 +312,18 @@ function createJsonRpcServer(pipe, methods, options = {}) {
   pipe.on('error', onError);
   pipe.on('close', onClose);
   pipe.on('end', onClose);
+
+  function notify(event, data) {
+    if (typeof event !== 'string' || !EVENT_PATTERN.test(event)) throw new TypeError('RPC event name is invalid');
+    assertJsonData(data);
+    if (closed || transportClosed || pipe.destroyed) return Promise.resolve();
+    const frame = b4a.from(`${JSON.stringify({ event, data })}\n`);
+    if (frame.byteLength > maxMessageBytes) return Promise.reject(new RangeError('RPC event is too large'));
+    return write(frame);
+  }
+
   return Object.freeze({
+    notify,
     close() {
       if (closingPromise) return closingPromise;
       closed = true;
@@ -314,12 +343,14 @@ export {
   DEFAULT_MAX_AGGREGATE_BYTES,
   DEFAULT_MAX_MESSAGE_BYTES,
   DEFAULT_MAX_QUEUED_REQUESTS,
+  EVENT_PATTERN,
   assertJsonData,
   assertPlainDataObject,
   createDriveRpcMethods,
   createLocaldriveRpcMethods,
   createMirrorRpcMethods,
   createBeamRpcMethods,
+  createChatRpcMethods,
   createResourceRpcMethods,
   createJsonRpcServer
 };

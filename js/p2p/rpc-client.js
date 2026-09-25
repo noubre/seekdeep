@@ -4,7 +4,7 @@ import {
   DEFAULT_MAX_MESSAGE_BYTES,
   assertJsonData,
   assertPlainDataObject
-} from './drive-rpc-server.js';
+} from './rpc-server.js';
 
 const DEFAULT_MAX_PENDING_REQUESTS = 128;
 
@@ -26,7 +26,7 @@ function defaultPipeFactory() {
   return pipe;
 }
 
-function createDriveRpcClient(options = {}) {
+function createRpcClient(options = {}) {
   const pipeFactory = options.pipeFactory || defaultPipeFactory;
   const timeout = options.timeout ?? 10000;
   const maxMessageBytes = options.maxMessageBytes ?? DEFAULT_MAX_MESSAGE_BYTES;
@@ -42,6 +42,7 @@ function createDriveRpcClient(options = {}) {
   let counter = 0;
   let closed = false;
   const pending = new Map();
+  const eventHandlers = new Map();
 
   function rejectPending(error) {
     for (const request of pending.values()) {
@@ -89,7 +90,21 @@ function createDriveRpcClient(options = {}) {
 
   function handleLine(line) {
     try {
-      const response = assertPlainDataObject(JSON.parse(b4a.toString(line)), ['id', 'ok', 'result', 'error'], 'RPC response');
+      const parsed = JSON.parse(b4a.toString(line));
+      if (
+        parsed && typeof parsed === 'object' && !Array.isArray(parsed) &&
+        typeof parsed.event === 'string' && Reflect.ownKeys(parsed).length === 2 && Object.hasOwn(parsed, 'data')
+      ) {
+        assertJsonData(parsed.data);
+        const handlers = eventHandlers.get(parsed.event);
+        if (handlers) {
+          for (const handler of handlers) {
+            try { handler(parsed.data); } catch (error) { console.error(`RPC event handler failed for ${parsed.event}:`, error); }
+          }
+        }
+        return;
+      }
+      const response = assertPlainDataObject(parsed, ['id', 'ok', 'result', 'error'], 'RPC response');
       if (typeof response.id !== 'string' && !Number.isSafeInteger(response.id)) throw new TypeError('RPC response id is invalid');
       const id = String(response.id);
       if (response.ok === true && Object.hasOwn(response, 'result') && !Object.hasOwn(response, 'error') && Reflect.ownKeys(response).length === 3) {
@@ -192,6 +207,20 @@ function createDriveRpcClient(options = {}) {
   }
 
   return Object.freeze({
+    on(event, handler) {
+      if (typeof event !== 'string' || !event) throw new TypeError('RPC event name must be a non-empty string');
+      if (typeof handler !== 'function') throw new TypeError('RPC event handler must be a function');
+      let handlers = eventHandlers.get(event);
+      if (!handlers) {
+        handlers = new Set();
+        eventHandlers.set(event, handlers);
+      }
+      handlers.add(handler);
+      return () => {
+        handlers.delete(handler);
+        if (!handlers.size) eventHandlers.delete(event);
+      };
+    },
     request,
     close() {
       if (closed) return;
@@ -208,6 +237,6 @@ function createDriveRpcClient(options = {}) {
   });
 }
 
-const driveRpcClient = createDriveRpcClient();
+const rpcClient = createRpcClient();
 
-export { DEFAULT_MAX_PENDING_REQUESTS, createDriveRpcClient, driveRpcClient };
+export { DEFAULT_MAX_PENDING_REQUESTS, createRpcClient, rpcClient };

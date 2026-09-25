@@ -1,13 +1,8 @@
-import {
-  initializeNewChat,
-  joinExistingChat,
-  leaveExistingChat,
-  isSwarmInitialized,
-  getTopicHex,
-  isConnectedToPeers
-} from '../../network/hyperswarm.js';
-import { isSessionHost } from '../../session/modes.js';
-import { getActivePeers } from '../../session/peers.js';
+/**
+ * Swarm slash service: thin adapter over the chat worker RPC.
+ * All data-plane work happens in the Bare worker.
+ */
+import { rpcClient } from '../../p2p/rpc-client.js';
 
 const MAX_DISPLAY_NAME_LENGTH = 64;
 const MAX_PEERS = 50;
@@ -31,89 +26,49 @@ function sanitizeDisplayName(value, peerId) {
   return Array.from(normalized).slice(0, MAX_DISPLAY_NAME_LENGTH).join('');
 }
 
-function createSwarmService(dependencies) {
-  const {
-    initializeNewChat,
-    joinExistingChat,
-    leaveExistingChat,
-    isSwarmInitialized,
-    getTopicHex,
-    isConnectedToPeers,
-    isSessionHost,
-    getActivePeers
-  } = dependencies;
+function statusShape(status) {
+  return {
+    initialized: Boolean(status?.initialized),
+    topic: status?.topic || null,
+    role: status?.role || 'none',
+    connected: Boolean(status?.connected),
+    peerCount: Number.isSafeInteger(status?.peerCount) ? status.peerCount : 0
+  };
+}
 
-  function status() {
-    const initialized = Boolean(isSwarmInitialized());
-    const topic = initialized ? getTopicHex() : null;
-    const activePeers = getActivePeers();
-    const peerCount = initialized && activePeers instanceof Map ? activePeers.size : 0;
-    const activeTopic = typeof topic === 'string' && topic.length > 0 ? topic : null;
+function createSwarmService(client = rpcClient) {
+  if (!client || typeof client.request !== 'function') throw new TypeError('Swarm RPC client is required');
 
-    return {
-      initialized,
-      topic: activeTopic,
-      role: activeTopic ? (isSessionHost() ? 'host' : 'joiner') : 'none',
-      connected: initialized && Boolean(isConnectedToPeers()),
-      peerCount
-    };
-  }
-
-  function runTransition(operation, failureMessage) {
-    try {
-      if (operation() === false) throw new Error(failureMessage);
-      return status();
-    } catch (error) {
-      leaveExistingChat({ announce: false });
-      throw error;
-    }
+  async function status() {
+    return statusShape(await client.request('chat.status', {}));
   }
 
   return Object.freeze({
     status,
-    create() {
-      return runTransition(
-        () => initializeNewChat({ announce: false, notify: true }),
-        'Failed to create swarm topic.'
-      );
-    },
-    join(topic) {
-      return runTransition(
-        () => joinExistingChat(topic, { announce: false, notify: true }),
-        'Failed to join swarm topic.'
-      );
-    },
-    leave() {
-      leaveExistingChat();
+    async create() {
+      await client.request('chat.create', {});
       return status();
     },
-    peers() {
-      const activePeers = getActivePeers();
-      if (!(activePeers instanceof Map)) return [];
-
-      const peers = [];
-      for (const [peerId, peerInfo = {}] of activePeers) {
-        if (peers.length >= MAX_PEERS) break;
-        peers.push({
-          id: truncateIdentifier(peerId),
-          displayName: sanitizeDisplayName(peerInfo.displayName, peerId),
-          role: peerInfo.isHost || peerInfo.isServer ? 'host' : 'peer'
-        });
-      }
-      return peers;
+    async join(topic) {
+      await client.request('chat.join', { topic });
+      return status();
+    },
+    async leave() {
+      await client.request('chat.leave', {});
+      return status();
+    },
+    async peers() {
+      const result = await client.request('chat.peers', {});
+      const peers = Array.isArray(result?.peers) ? result.peers : [];
+      return peers.slice(0, MAX_PEERS).map((peer) => ({
+        id: truncateIdentifier(peer.id),
+        displayName: sanitizeDisplayName(peer.displayName, peer.id),
+        role: peer.role === 'host' ? 'host' : 'peer'
+      }));
     }
   });
 }
 
-const swarmService = createSwarmService({
-  initializeNewChat,
-  joinExistingChat,
-  leaveExistingChat,
-  isSwarmInitialized,
-  getTopicHex,
-  isConnectedToPeers,
-  isSessionHost,
-  getActivePeers
-});
+const swarmService = createSwarmService();
 
 export { createSwarmService, swarmService };

@@ -1,6 +1,6 @@
-import { driveRpcClient } from '../../p2p/drive-rpc-client.js';
+import { rpcClient } from '../../p2p/rpc-client.js';
 
-function createLocaldriveService(client = driveRpcClient) {
+function createLocaldriveService(client = rpcClient) {
   if (!client || typeof client.request !== 'function') throw new TypeError('Localdrive RPC client is required');
   return Object.freeze({
     add: (name, root, writable = false) => client.request('localdrive.add', { name, root, writable }),

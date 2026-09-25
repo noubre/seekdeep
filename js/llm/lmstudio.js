@@ -1,746 +1,107 @@
 /**
- * LLM LM Studio module
- * Contains functions for interacting with the LM Studio API
+ * LM Studio provider factory.
+ *
+ * Pure: no DOM, no chat history, no UI imports. Streams SSE `data:` lines and
+ * wraps `reasoning_content` deltas as ` thinking…</think>` for the renderer.
  */
-import { getLMStudioBaseUrl } from './models.js';
-import { addToChatHistory, findLastMessageByRequestId } from '../messages/history.js';
-import {
-  generateRequestId,
-  setActiveRequestId,
-  addActiveRequest
-} from '../messages/history.js';
-import { parseOllamaResponse, formatThinkingContent } from '../messages/formatting.js';
-import { isSessionHost, getCollaborativeMode } from '../session/modes.js';
-import { broadcastToPeers } from '../network/messaging.js';
-import { conns, findHostConnection } from '../network/hyperswarm.js';
-import { getPeerDisplayName } from '../session/peers.js';
-import { updateChatDisplay } from '../ui/rendering.js';
 
-/**
- * Ask the LLM a question using LM Studio API
- * @param {string} model - The model to use
- * @param {string} prompt - The prompt to send
- * @returns {Promise<string|null>} A promise that resolves to the response text or null
- */
-async function ask(model, prompt) {
-  const requestId = generateRequestId();
+const DEFAULT_BASE_URL = 'http://localhost:1234';
 
-  // Add user message to chat
-  const userMessage = {
-    type: 'user',
-    content: prompt,
-    requestId: requestId,
-    fromPeer: isSessionHost() ? 'Host' : 'You'
-  };
-
-  addToChatHistory(userMessage);
-
-  // If host is submitting, broadcast the user message to peers
-  if (isSessionHost() && getCollaborativeMode()) {
-    broadcastToPeers({
-      type: 'peer_message',
-      messageType: 'user',
-      content: prompt,
-      fromPeer: 'Host',
-      requestId: requestId
-    });
-  }
-
-  // Add thinking message
-  addToChatHistory({
-    type: 'thinking',
-    content: 'Thinking...',
-    requestId: requestId
-  });
-
-  try {
-    if (isSessionHost()) {
-      // If we're the host, query our local LM Studio
-      const baseUrl = getLMStudioBaseUrl();
-      const url = new URL('/api/v0/chat/completions', baseUrl);
-
-      console.log('Querying LM Studio at URL:', url.toString());
-
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model,
-          messages: [
-            {
-              role: 'user',
-              content: prompt
-            }
-          ],
-          stream: true,
-          temperature: 0.7,
-          max_tokens: -1
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error: ${response.status}`);
-      }
-
-      const reader = response.body.getReader();
-      let decoder = new TextDecoder();
-      let responseText = '';
-
-      // Remove the thinking message
-      const thinkingIndex = findThinkingMessageIndex(requestId);
-      if (thinkingIndex !== -1) {
-        removeThinkingMessage(thinkingIndex);
-      }
-
-      // Create an assistant message that we'll update incrementally
-      const assistantMessage = {
-        type: 'assistant',
-        content: '',
-        rawContent: '',
-        requestId: requestId,
-        fromPeer: 'Host',
-        isComplete: false,
-        currentReasoningContent: '' // Track accumulated reasoning content
-      };
-
-      // Add the initial empty message to the chat history
-      addToChatHistory(assistantMessage);
-
-      let lastAssistantMessage = null;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value);
-        console.log("Raw chunk from LM Studio:", chunk);
-
-        // Handle Server-Sent Events format
-        const lines = chunk.split('\n').filter(line => line.trim());
-        
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6); // Remove 'data: ' prefix
-            
-            if (data === '[DONE]') {
-              console.log("LM Studio stream completed");
-              break;
-            }
-
-            try {
-              const json = JSON.parse(data);
-              
-              // Extract content from LM Studio's response format
-              const delta = json.choices?.[0]?.delta;
-              const responseChunk = delta?.content || '';
-              const reasoningChunk = delta?.reasoning_content || '';
-              
-              // Handle reasoning content (thinking) from LM Studio
-              if (reasoningChunk) {
-                console.log("Extracted reasoning chunk from LM Studio:", reasoningChunk);
-                
-                // Accumulate reasoning content
-                assistantMessage.currentReasoningContent += reasoningChunk;
-                
-                // Update the message with the accumulated reasoning content wrapped in think tags
-                const updatedRawContent = assistantMessage.rawContent.replace(/<think>.*?<\/think>/g, '') + 
-                                         `<think>${assistantMessage.currentReasoningContent}</think>`;
-                
-                assistantMessage.rawContent = updatedRawContent;
-                assistantMessage.content = formatThinkingContent(assistantMessage.rawContent);
-                responseText = updatedRawContent;
-
-                // Find the last assistant message with this request ID
-                lastAssistantMessage = findLastMessageByRequestId(requestId, 'assistant');
-
-                if (lastAssistantMessage) {
-                  // Update the existing message
-                  lastAssistantMessage.rawContent = assistantMessage.rawContent;
-                  lastAssistantMessage.content = assistantMessage.content;
-                  lastAssistantMessage.currentReasoningContent = assistantMessage.currentReasoningContent;
-                  updateChatDisplay(); // Trigger UI update
-                }
-
-                if (isSessionHost() && getCollaborativeMode()) {
-                  broadcastToPeers({
-                    type: 'response',
-                    requestId,
-                    data: `<think>${assistantMessage.currentReasoningContent}</think>`,
-                    isComplete: false,
-                    isJson: false,
-                    isPrivate: false,
-                    fromPeerId: 'host',
-                    isReasoningUpdate: true
-                  }, null, null, true);
-                }
-              }
-              
-              // Handle regular content
-              if (responseChunk) {
-                console.log("Extracted response chunk from LM Studio:", responseChunk);
-                
-                // Add the response chunk to our full response text
-                responseText += responseChunk;
-
-                // Update our assistant message with the new chunk
-                assistantMessage.rawContent += responseChunk;
-                assistantMessage.content = formatThinkingContent(assistantMessage.rawContent);
-
-                // Find the last assistant message with this request ID
-                lastAssistantMessage = findLastMessageByRequestId(requestId, 'assistant');
-
-                if (lastAssistantMessage) {
-                  // Update the existing message
-                  lastAssistantMessage.rawContent = assistantMessage.rawContent;
-                  lastAssistantMessage.content = assistantMessage.content;
-                  updateChatDisplay(); // Trigger UI update
-                }
-
-                if (isSessionHost() && getCollaborativeMode()) {
-                  broadcastToPeers({
-                    type: 'response',
-                    requestId,
-                    data: responseChunk,
-                    isComplete: false,
-                    isJson: false,
-                    isPrivate: false,
-                    fromPeerId: 'host'
-                  }, null, null, true);
-                }
-              }
-            } catch (parseError) {
-              console.warn("Error parsing LM Studio chunk as JSON:", parseError);
-            }
-          }
-        }
-      }
-
-      // Mark the message as complete
-      assistantMessage.isComplete = true;
-
-      // Log the final state
-      console.log("Final LM Studio message content:", assistantMessage.rawContent);
-      console.log("Contains thinking tags:", assistantMessage.rawContent && assistantMessage.rawContent.includes("<think>"));
-      console.log("Processed content:", assistantMessage.content);
-
-      // Find the last assistant message with this request ID
-      lastAssistantMessage = findLastMessageByRequestId(requestId, 'assistant');
-
-      if (lastAssistantMessage) {
-        // Update the existing message one last time to ensure final state is rendered
-        lastAssistantMessage.isComplete = true;
-        updateChatDisplay(); // Trigger UI update
-      }
-
-      if (isSessionHost() && getCollaborativeMode()) {
-        broadcastToPeers({
-          type: 'response',
-          requestId,
-          data: '',
-          isComplete: true,
-          isJson: false,
-          isPrivate: false,
-          fromPeerId: 'host'
-        }, null, null, true);
-      }
-
-      // Store this requestId as our activeRequestId
-      setActiveRequestId(requestId);
-      // Add to our activeRequests tracking map
-      addActiveRequest(requestId, {
-        prompt: prompt,
-        model: model,
-        fromPeer: 'You'
-      });
-      console.log(`Setting activeRequestId to: ${requestId}`);
-
-      // Return the full response for any further processing
-      return responseText;
-    } else {
-      // If we're not the host, send the query directly to the host
-      const hostConn = findHostConnection();
-
-      if (!hostConn) {
-        throw new Error('Not connected to a host');
-      }
-
-      // Store the requestId as our activeRequestId so we can track responses
-      setActiveRequestId(requestId);
-      addActiveRequest(requestId, {
-        prompt: prompt,
-        model: model,
-        fromPeer: 'You'
-      });
-      console.log(`Setting activeRequestId to: ${requestId} for our peer query`);
-
-      // Get our own peer ID from the hyperswarm module
-      const { getPublicKey } = await import('../network/hyperswarm.js');
-      const ourPeerId = getPublicKey();
-
-      // Send the query directly to the host
-      hostConn.write(JSON.stringify({
-        type: 'query',
-        model,
-        prompt,
-        requestId,
-        fromPeerId: ourPeerId, // This should be the peer's own ID, not the host's ID
-        provider: 'lmstudio' // Indicate this is for LM Studio
-      }));
-
-      console.log('Query sent directly to host, awaiting response');
-      return null;
-    }
-  } catch (error) {
-    console.error('Error in LM Studio ask:', error);
-
-    // Remove the thinking message
-    const thinkingIndex = findThinkingMessageIndex(requestId);
-    if (thinkingIndex !== -1) {
-      removeThinkingMessage(thinkingIndex);
-    }
-
-    // Add error message
-    addToChatHistory({
-      type: 'system',
-      content: `Error: ${error.message}`,
-      requestId: requestId
-    });
-
-    return null;
-  }
+function resolveFetch(fetchImpl) {
+  const resolved = fetchImpl || globalThis.fetch;
+  if (typeof resolved !== 'function') throw new TypeError('LM Studio provider requires a fetch implementation');
+  return resolved;
 }
 
-/**
- * Handle a query from a peer using LM Studio
- * @param {Object} conn - The connection object
- * @param {Object} message - The query message
- * @param {string} peerId - The ID of the peer
- */
-async function handlePeerQuery(conn, message, peerId) {
-  try {
-    // Get the peer display name
-    const peerName = getPeerDisplayName(peerId);
-
-    // Store the active request ID to properly track this request
-    const requestId = message.requestId;
-    console.log(`Handling peer query with requestId: ${requestId} from peer: ${peerName} using LM Studio`);
-
-    // In collaborative mode, show the thinking message and the query to the host
-    if (getCollaborativeMode()) {
-      addToChatHistory({
-        type: 'thinking',
-        content: `Received query from peer: ${message.prompt}\nThinking...`,
-        requestId: requestId
-      });
-
-      // Also broadcast this peer's query to all other peers
-      for (const peerConn of conns) {
-        // Skip the original sender
-        if (peerConn === conn) continue;
-
-        peerConn.write(JSON.stringify({
-          type: 'peer_message',
-          messageType: 'user',
-          content: message.prompt,
-          fromPeer: peerName,
-          requestId: requestId
-        }));
-      }
-    }
-
-    // Stream the response directly to the peer as it comes from LM Studio
-    const fullResponse = await streamResponseToPeer(conn, message.model, message.prompt, requestId, peerId);
-
-    // Only add the response to our chat history if we're in collaborative mode
-    if (getCollaborativeMode() && fullResponse) {
-      addToChatHistory({
-        type: 'assistant',
-        content: formatThinkingContent(fullResponse),
-        rawContent: fullResponse,
-        requestId: requestId,
-        fromPeer: peerName
-      });
-
-      console.log("Added LM Studio response to host's chat history with thinking content:", {
-        hasThinkingTags: fullResponse && fullResponse.includes("<think>"),
-        hasThinkingHTML: fullResponse && formatThinkingContent(fullResponse).includes("thinking-content")
-      });
-    }
-  } catch (error) {
-    console.error('Error handling peer query with LM Studio:', error);
-    conn.write(JSON.stringify({
-      type: 'response',
-      requestId: message.requestId,
-      error: error.message,
-      isComplete: true,
-      isPrivate: !getCollaborativeMode(),
-      fromPeerId: message.fromPeerId || peerId
-    }));
-
-    // Only add the error message to our chat history if we're in collaborative mode
-    if (getCollaborativeMode()) {
-      addToChatHistory({
-        type: 'system',
-        content: `Error responding to peer: ${error.message}`
-      });
-    }
-  }
+function normalizeModels(data) {
+  const models = Array.isArray(data?.data) ? data.data : [];
+  return models
+    .map((model) => {
+      const id = model?.id;
+      if (typeof id !== 'string' || !id) return null;
+      const entry = { id, name: id };
+      if (typeof model?.created === 'string') entry.modified_at = model.created;
+      return entry;
+    })
+    .filter(Boolean);
 }
 
-/**
- * Stream response to a peer in real-time using LM Studio
- * @param {Object} conn - The connection object
- * @param {string} model - The model to use
- * @param {string} prompt - The prompt to send
- * @param {string} requestId - The request ID
- * @param {string} peerId - The ID of the peer
- * @returns {Promise<string>} A promise that resolves to the complete response text
- */
-async function streamResponseToPeer(conn, model, prompt, requestId, peerId) {
-  try {
-    const baseUrl = getLMStudioBaseUrl();
-    const url = new URL('/api/v0/chat/completions', baseUrl);
+function createLMStudio(options = {}) {
+  const fetchImpl = resolveFetch(options.fetch);
+  const baseUrl = new URL(options.baseUrl || DEFAULT_BASE_URL);
 
-    console.log('Streaming LM Studio response to peer - querying at URL:', url.toString());
+  async function listModels({ signal } = {}) {
+    const response = await fetchImpl(new URL('/api/v0/models', baseUrl), { method: 'GET', signal });
+    if (!response.ok) throw new Error(`LM Studio listModels failed: HTTP ${response.status}`);
+    const data = await response.json();
+    return normalizeModels(data);
+  }
 
-    const response = await fetch(url, {
+  async function ask(model, prompt, askOptions = {}) {
+    if (typeof model !== 'string' || !model) throw new TypeError('LM Studio ask requires a model');
+    if (typeof prompt !== 'string') throw new TypeError('LM Studio ask requires a prompt');
+    const onChunk = askOptions.onChunk;
+    if (onChunk !== undefined && typeof onChunk !== 'function') throw new TypeError('onChunk must be a function');
+
+    const response = await fetchImpl(new URL('/api/v0/chat/completions', baseUrl), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model,
-        messages: [
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
+        messages: [{ role: 'user', content: prompt }],
         stream: true,
         temperature: 0.7,
         max_tokens: -1
-      })
+      }),
+      signal: askOptions.signal
     });
+    if (!response.ok) throw new Error(`LM Studio ask failed: HTTP ${response.status}`);
 
-    if (!response.ok) {
-      throw new Error(`HTTP error: ${response.status}`);
-    }
-
-    // Handle streaming response
     const reader = response.body.getReader();
-    let decoder = new TextDecoder();
-    let fullResponseText = '';
-    let currentReasoningContent = ''; // Track accumulated reasoning content
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let text = '';
+    let reasoning = '';
+
+    const consumeLine = (line) => {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('data:')) return;
+      const payload = trimmed.slice('data:'.length).trim();
+      if (!payload || payload === '[DONE]') return;
+      let json;
+      try { json = JSON.parse(payload); } catch { return; }
+      const delta = json?.choices?.[0]?.delta;
+      if (!delta) return;
+      const reasoningChunk = typeof delta.reasoning_content === 'string' ? delta.reasoning_content : '';
+      if (reasoningChunk) {
+        reasoning += reasoningChunk;
+        const wrapped = ` thinking${reasoning}</think>`;
+        text = `${text.replace(/ thinking[\s\S]*?<\/think>/g, '')}${wrapped}`;
+        if (onChunk) onChunk(wrapped);
+      }
+      const content = typeof delta.content === 'string' ? delta.content : '';
+      if (content) {
+        text += content;
+        if (onChunk) onChunk(content);
+      }
+    };
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-
-      const chunk = decoder.decode(value);
-      console.log("Raw chunk from LM Studio for peer streaming:", chunk);
-
-      // Handle Server-Sent Events format
-      const lines = chunk.split('\n').filter(line => line.trim());
-      
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6); // Remove 'data: ' prefix
-          
-          if (data === '[DONE]') {
-            console.log("LM Studio peer stream completed");
-            break;
-          }
-
-          try {
-            const json = JSON.parse(data);
-            
-            // Extract content from LM Studio's response format
-            const delta = json.choices?.[0]?.delta;
-            const responseChunk = delta?.content || '';
-            const reasoningChunk = delta?.reasoning_content || '';
-            
-            // Handle reasoning content (thinking) from LM Studio
-            if (reasoningChunk) {
-              console.log("Extracted reasoning chunk for LM Studio peer streaming:", reasoningChunk);
-              
-              // Accumulate reasoning content
-              currentReasoningContent += reasoningChunk;
-              
-              // Create a version of the full response with the accumulated reasoning content
-              const updatedResponseText = fullResponseText.replace(/<think>.*?<\/think>/g, '') + 
-                                         `<think>${currentReasoningContent}</think>`;
-              
-              // Send the updated thinking content to the peer
-              const isPrivate = !getCollaborativeMode();
-              
-              // Find the connection for this specific peer and send the chunk
-              for (const peerConn of conns) {
-                const connPeerId = peerConn.remotePublicKey.toString('hex');
-                if (connPeerId === peerId) {
-                  peerConn.write(JSON.stringify({
-                    type: 'response',
-                    requestId: requestId,
-                    // Send the complete thinking content wrapped in think tags
-                    data: `<think>${currentReasoningContent}</think>`,
-                    isComplete: false,
-                    isJson: false,
-                    isPrivate: isPrivate,
-                    fromPeerId: peerId,
-                    isReasoningUpdate: true // Flag to indicate this is a reasoning update
-                  }));
-                  console.log("Sent accumulated LM Studio reasoning to peer");
-                  break;
-                }
-              }
-
-              if (getCollaborativeMode()) {
-                broadcastToPeers({
-                  type: 'response',
-                  requestId: requestId,
-                  data: `<think>${currentReasoningContent}</think>`,
-                  isComplete: false,
-                  isJson: false,
-                  isPrivate: false,
-                  fromPeerId: peerId,
-                  isReasoningUpdate: true
-                }, null, peerId, true);
-              }
-              
-              // Update the full response text with the accumulated reasoning
-              fullResponseText = updatedResponseText;
-            }
-            
-            // Handle regular content
-            if (responseChunk) {
-              console.log("Extracted response chunk for LM Studio peer streaming:", responseChunk);
-
-              // Add the response chunk to our full response text
-              fullResponseText += responseChunk;
-
-              // Send this chunk immediately to the peer for real-time streaming
-              const isPrivate = !getCollaborativeMode();
-              
-              // Find the connection for this specific peer and send the chunk
-              for (const peerConn of conns) {
-                const connPeerId = peerConn.remotePublicKey.toString('hex');
-                if (connPeerId === peerId) {
-                  peerConn.write(JSON.stringify({
-                    type: 'response',
-                    requestId: requestId,
-                    data: responseChunk,
-                    isComplete: false,
-                    isJson: false,
-                    isPrivate: isPrivate,
-                    fromPeerId: peerId
-                  }));
-                  console.log("Sent LM Studio streaming chunk to peer:", JSON.stringify(responseChunk));
-                  break;
-                }
-              }
-
-              if (getCollaborativeMode()) {
-                broadcastToPeers({
-                  type: 'response',
-                  requestId: requestId,
-                  data: responseChunk,
-                  isComplete: false,
-                  isJson: false,
-                  isPrivate: false,
-                  fromPeerId: peerId
-                }, null, peerId, true);
-              }
-            }
-          } catch (parseError) {
-            console.warn("Error parsing LM Studio chunk as JSON:", parseError);
-          }
-        }
+      buffer += decoder.decode(value, { stream: true });
+      let newline;
+      while ((newline = buffer.indexOf('\n')) !== -1) {
+        consumeLine(buffer.slice(0, newline));
+        buffer = buffer.slice(newline + 1);
       }
     }
-
-    // Send completion message to peer
-    const isPrivate = !getCollaborativeMode();
-    
-    for (const peerConn of conns) {
-      const connPeerId = peerConn.remotePublicKey.toString('hex');
-      if (connPeerId === peerId) {
-        peerConn.write(JSON.stringify({
-          type: 'response',
-          requestId: requestId,
-          data: '',
-          isComplete: true,
-          isJson: false,
-          isPrivate: isPrivate,
-          fromPeerId: peerId
-        }));
-        console.log("Sent LM Studio completion signal to peer for requestId:", requestId);
-        break;
-      }
-    }
-
-    if (getCollaborativeMode()) {
-      broadcastToPeers({
-        type: 'response',
-        requestId: requestId,
-        data: '',
-        isComplete: true,
-        isJson: false,
-        isPrivate: false,
-        fromPeerId: peerId
-      }, null, peerId, true);
-    }
-
-    console.log("Complete streamed response text from LM Studio for peer:", fullResponseText);
-    return fullResponseText;
-  } catch (error) {
-    console.error('Error streaming LM Studio response to peer:', error);
-    
-    // Send error message to peer
-    const isPrivate = !getCollaborativeMode();
-    
-    for (const peerConn of conns) {
-      const connPeerId = peerConn.remotePublicKey.toString('hex');
-      if (connPeerId === peerId) {
-        peerConn.write(JSON.stringify({
-          type: 'response',
-          requestId: requestId,
-          error: error.message,
-          isComplete: true,
-          isPrivate: isPrivate,
-          fromPeerId: peerId
-        }));
-        break;
-      }
-    }
-    
-    throw error;
+    buffer += decoder.decode();
+    if (buffer) consumeLine(buffer);
+    return text;
   }
+
+  return Object.freeze({ listModels, ask, baseUrl: baseUrl.origin, provider: 'lmstudio' });
 }
 
-/**
- * Query the local LM Studio directly
- * @param {string} model - The model to use
- * @param {string} prompt - The prompt to send
- * @returns {Promise<string>} A promise that resolves to the response text
- */
-async function queryLocalLLM(model, prompt) {
-  try {
-    const baseUrl = getLMStudioBaseUrl();
-    const url = new URL('/api/v0/chat/completions', baseUrl);
-
-    console.log('Querying LM Studio at URL:', url.toString());
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        messages: [
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        stream: true,
-        temperature: 0.7,
-        max_tokens: -1
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP error: ${response.status}`);
-    }
-
-    // Handle streaming response
-    const reader = response.body.getReader();
-    let decoder = new TextDecoder();
-    let responseText = '';
-    let currentReasoningContent = ''; // Track accumulated reasoning content
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      const chunk = decoder.decode(value);
-      console.log("Raw chunk from LM Studio for peer query:", chunk);
-
-      // Handle Server-Sent Events format
-      const lines = chunk.split('\n').filter(line => line.trim());
-      
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6); // Remove 'data: ' prefix
-          
-          if (data === '[DONE]') {
-            console.log("LM Studio query stream completed");
-            break;
-          }
-
-          try {
-            const json = JSON.parse(data);
-            
-            // Extract content from LM Studio's response format
-            const delta = json.choices?.[0]?.delta;
-            const responseChunk = delta?.content || '';
-            const reasoningChunk = delta?.reasoning_content || '';
-            
-            // Handle reasoning content (thinking) from LM Studio
-            if (reasoningChunk) {
-              console.log("Extracted reasoning chunk for LM Studio peer query:", reasoningChunk);
-              
-              // Accumulate reasoning content
-              currentReasoningContent += reasoningChunk;
-              
-              // Update the response text with the accumulated reasoning content
-              const updatedResponseText = responseText.replace(/<think>.*?<\/think>/g, '') + 
-                                         `<think>${currentReasoningContent}</think>`;
-              
-              // Replace the response text with the updated version
-              responseText = updatedResponseText;
-            }
-            
-            // Handle regular content
-            if (responseChunk) {
-              console.log("Extracted response chunk for LM Studio peer query:", responseChunk);
-              responseText += responseChunk;
-            }
-          } catch (parseError) {
-            console.warn("Error parsing LM Studio chunk as JSON:", parseError);
-          }
-        }
-      }
-    }
-
-    console.log("Complete response text for LM Studio peer query:", responseText);
-    const formattedResponseText = formatThinkingContent(responseText);
-    console.log("Contains thinking tags:", formattedResponseText && formattedResponseText.includes("<think>"));
-
-    return responseText;
-  } catch (error) {
-    console.error('Error querying local LM Studio:', error);
-    throw error;
-  }
-}
-
-/**
- * Find the index of a thinking message with a specific request ID
- * @param {string} requestId - The request ID to search for
- * @returns {number} The index of the thinking message or -1 if not found
- */
-function findThinkingMessageIndex(requestId) {
-  // This is a simplified version - in a real implementation, we would get this from the history module
-  return -1;
-}
-
-/**
- * Remove a thinking message at a specific index
- * @param {number} index - The index of the thinking message to remove
- */
-function removeThinkingMessage(index) {
-  // This is a simplified version - in a real implementation, we would get this from the history module
-}
-
-// Export functions
-export {
-  ask,
-  handlePeerQuery,
-  queryLocalLLM,
-  streamResponseToPeer
-};
+export { DEFAULT_BASE_URL, createLMStudio, normalizeModels };

@@ -1,197 +1,134 @@
 /**
- * UI Events module
- * Contains event listeners and handlers for UI interactions
+ * UI Events module.
+ *
+ * The renderer is a view/controller: every network or provider action is a
+ * JSON-RPC call through `chatClient`; state arrives back as `chat.event`s and
+ * is rendered by the store/client-state subscribers.
  */
-import { 
-  form, 
-  promptArea, 
-  joinButton, 
-  topicKeyInput, 
+import {
+  form,
+  promptArea,
+  joinButton,
+  topicKeyInput,
   refreshModelsButton,
   providerSelect,
   getPromptValue,
   getSelectedModel,
   getSelectedProvider,
-  setSelectedProvider,
   clearPromptArea,
   getTopicKeyValue,
   clearTopicKeyInput,
   setRefreshModelsLoading,
   updateRefreshModelsTooltip,
-  isCollaborativeModeSelected,
-  setChatModeSelectValue,
-  setChatModeSelectEnabled,
   chatModeSelect,
   chatMessagesEl
 } from './elements.js';
-import { addToChatHistory } from '../messages/history.js';
-import { joinExistingChat } from '../network/hyperswarm.js';
-import { broadcastToPeers } from '../network/messaging.js';
-import { isSessionHost, getCollaborativeMode, setCollaborativeMode } from '../session/modes.js';
-import { fetchAvailableModels, requestModelsFromHost } from '../llm/models.js';
-import { ask, setCurrentProvider } from '../llm/provider.js';
-import * as persistenceManager from '../messages/persistence-manager.js';
-import * as historyBrowser from './history-browser.js';
+import { addMessage, clear } from '../messages/store.js';
 import { dispatchSlashTag } from '../slash/registry.js';
 import { createEphemeralRenderer } from './ephemeral.js';
 import { routePromptSubmission } from './submit-routing.js';
-import { swarmService } from '../slash/services/swarm.js';
-import { dhtService } from '../slash/services/dht.js';
-import { driveService } from '../slash/services/drive.js';
-import { localdriveService } from '../slash/services/localdrive.js';
-import { mirrorService } from '../slash/services/mirror.js';
-import { beamService } from '../slash/services/beam.js';
+import { createSwarmService } from '../slash/services/swarm.js';
+import { createDHTService } from '../slash/services/dht.js';
+import { createDriveService } from '../slash/services/drive.js';
+import { createLocaldriveService } from '../slash/services/localdrive.js';
+import { createMirrorService } from '../slash/services/mirror.js';
+import { createBeamService } from '../slash/services/beam.js';
+import { createChatSlashService } from '../slash/services/chat.js';
+import * as sessionStore from '../session/session-store.js';
+import { clearAllSessions } from '../session/storage.js';
+import * as historyBrowser from './history-browser.js';
+
+function systemMessage(content) {
+  addMessage({ type: 'system', content });
+}
+
+function slashServices(chatClient) {
+  const client = chatClient.rpc;
+  return {
+    swarm: createSwarmService(client),
+    dht: createDHTService(client),
+    drive: createDriveService(client),
+    localdrive: createLocaldriveService(client),
+    mirror: createMirrorService(client),
+    beam: createBeamService(client),
+    chat: createChatSlashService(client)
+  };
+}
 
 /**
- * Set up all event listeners for the UI
+ * Wire DOM event listeners. `chatClient` and `clientState` are injected by main.
  */
-function setupEventListeners() {
-  // History browser handlers
+function setupEventListeners({ chatClient, clientState } = {}) {
+  if (!chatClient || !chatClient.api) throw new TypeError('setupEventListeners requires a chat client');
+  const services = slashServices(chatClient);
+
   const historyToggle = document.getElementById('history-toggle');
   const historyClose = document.getElementById('history-close');
   const historyOverlay = document.getElementById('history-overlay');
   const sessionSearch = document.getElementById('session-search');
-  
-  if (historyToggle) {
-    historyToggle.addEventListener('click', handleHistoryToggle);
-  }
-  
-  if (historyClose) {
-    historyClose.addEventListener('click', handleHistoryToggle);
-  }
-  
-  if (historyOverlay) {
-    historyOverlay.addEventListener('click', handleHistoryToggle);
-  }
-  
-  if (sessionSearch) {
-    sessionSearch.addEventListener('input', handleSessionSearch);
-  }
-  
-  // Persistence control handlers
+  if (historyToggle) historyToggle.addEventListener('click', handleHistoryToggle);
+  if (historyClose) historyClose.addEventListener('click', handleHistoryToggle);
+  if (historyOverlay) historyOverlay.addEventListener('click', handleHistoryToggle);
+  if (sessionSearch) sessionSearch.addEventListener('input', handleSessionSearch);
+
   const persistenceCheckbox = document.getElementById('persistence-enabled');
   const exportButton = document.getElementById('export-history');
   const clearButton = document.getElementById('clear-history');
-  
-  if (persistenceCheckbox) {
-    persistenceCheckbox.addEventListener('change', handlePersistenceToggle);
-  }
-  
-  if (exportButton) {
-    exportButton.addEventListener('click', handleExportHistory);
-  }
-  
-  if (clearButton) {
-    clearButton.addEventListener('click', handleClearHistory);
-  }
-  
-  // Form submission handler
-  if (form) {
-    form.addEventListener('submit', handleFormSubmit);
-  }
-  
-  // Prompt area keyboard shortcuts
-  if (promptArea) {
-    promptArea.addEventListener('keydown', handlePromptKeydown);
-  }
-  
-  // Join button click handler
-  if (joinButton) {
-    joinButton.addEventListener('click', handleJoinButtonClick);
-  }
-  
-  // Topic key input Enter key handler
-  if (topicKeyInput) {
-    topicKeyInput.addEventListener('keydown', handleTopicKeyInputKeydown);
-  }
-  
-  // Chat mode selector change handler
+  if (persistenceCheckbox) persistenceCheckbox.addEventListener('change', handlePersistenceToggle);
+  if (exportButton) exportButton.addEventListener('click', handleExportHistory);
+  if (clearButton) clearButton.addEventListener('click', handleClearHistory);
+
+  if (form) form.addEventListener('submit', (event) => handleFormSubmit(event, chatClient, services));
+  if (promptArea) promptArea.addEventListener('keydown', handlePromptKeydown);
+  if (joinButton) joinButton.addEventListener('click', () => handleJoinButtonClick(chatClient));
+  if (topicKeyInput) topicKeyInput.addEventListener('keydown', handleTopicKeyInputKeydown);
+
   if (chatModeSelect) {
-    chatModeSelect.addEventListener('change', handleChatModeChange);
-    setChatModeSelectValue(getCollaborativeMode());
-    setChatModeSelectEnabled(isSessionHost());
+    chatModeSelect.addEventListener('change', () => handleChatModeChange(chatClient, clientState));
+    chatModeSelect.value = clientState?.getState().collaborative ? 'collaborative' : 'private';
+    chatModeSelect.disabled = clientState?.getState().role !== 'host';
   }
-  
-  // Provider selection change handler
-  if (providerSelect) {
-    providerSelect.addEventListener('change', handleProviderChange);
-  }
-  
-  // Refresh models button click handler
-  if (refreshModelsButton) {
-    refreshModelsButton.addEventListener('click', handleRefreshModelsClick);
-  }
+  if (providerSelect) providerSelect.addEventListener('change', () => handleProviderChange(chatClient));
+  if (refreshModelsButton) refreshModelsButton.addEventListener('click', () => handleRefreshModelsClick(chatClient));
 }
 
-/**
- * Handle form submission (sending a message)
- * @param {Event} event - The form submit event
- */
-async function handleFormSubmit(event) {
+async function handleFormSubmit(event, chatClient, services) {
   event.preventDefault();
-  
   const prompt = getPromptValue();
-  if (prompt.length === 0) {
-    return;
-  }
-  
+  if (prompt.length === 0) return;
   const emitEphemeral = createEphemeralRenderer(chatMessagesEl);
   await routePromptSubmission(prompt, {
     dispatchSlashTag,
     emitEphemeral,
-    services: { swarm: swarmService, dht: dhtService, drive: driveService, localdrive: localdriveService, mirror: mirrorService, beam: beamService },
+    services,
     getSelectedModel,
     clearPromptArea,
-    ask
+    ask: (model, text) => chatClient.api.send({ prompt: text, model })
   });
 }
 
-/**
- * Handle keyboard shortcuts in the prompt area
- * @param {KeyboardEvent} event - The keydown event
- */
 function handlePromptKeydown(event) {
-  // Ctrl+Enter or Cmd+Enter to submit
   if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
     form.dispatchEvent(new Event('submit'));
-  } 
-  // Enter without Shift to submit (Shift+Enter for new line)
-  else if (event.key === 'Enter' && !event.shiftKey) {
+  } else if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
     form.dispatchEvent(new Event('submit'));
   }
 }
 
-/**
- * Handle join button click
- */
-function handleJoinButtonClick() {
+function handleJoinButtonClick(chatClient) {
   const topicKeyHex = getTopicKeyValue();
-  if (topicKeyHex) {
-    const success = joinExistingChat(topicKeyHex);
-    if (success) {
-      // Clear the input after joining
-      clearTopicKeyInput();
-      setChatModeSelectEnabled(false);
-    } else {
-      // If joining failed, show an error message
-      addToChatHistory({
-        type: 'system',
-        content: 'Failed to join chat session. Please check the topic key and try again.'
-      });
-    }
-  } else {
-    addToChatHistory({
-      type: 'system',
-      content: 'Please enter a valid topic key to join a chat session.'
-    });
+  if (!topicKeyHex) {
+    systemMessage('Please enter a valid topic key to join a chat session.');
+    return;
   }
+  chatClient.api.join({ topic: topicKeyHex }).then(() => {
+    clearTopicKeyInput();
+  }).catch((error) => {
+    systemMessage(`Failed to join chat session: ${error.message}`);
+  });
 }
 
-/**
- * Handle Enter key in topic key input
- * @param {KeyboardEvent} event - The keydown event
- */
 function handleTopicKeyInputKeydown(event) {
   if (event.key === 'Enter') {
     event.preventDefault();
@@ -199,207 +136,65 @@ function handleTopicKeyInputKeydown(event) {
   }
 }
 
-/**
- * Handle chat mode changes. Only the host can change room visibility.
- */
-function handleChatModeChange() {
-  const requestedMode = isCollaborativeModeSelected();
-
-  if (!isSessionHost()) {
-    setChatModeSelectValue(getCollaborativeMode());
-    addToChatHistory({
-      type: 'system',
-      content: 'Only the host can change chat mode.'
-    });
-    return;
-  }
-
-  setCollaborativeMode(requestedMode);
-  broadcastToPeers({
-    type: 'mode_update',
-    isCollaborativeMode: requestedMode
-  }, null, null, true);
-
-  addToChatHistory({
-    type: 'system',
-    content: `Chat mode changed to ${requestedMode ? 'Collaborative' : 'Private'}.`
+function handleChatModeChange(chatClient) {
+  const requestedMode = chatModeSelect ? chatModeSelect.value === 'collaborative' : false;
+  chatClient.api.setMode({ collaborative: requestedMode }).catch((error) => {
+    systemMessage(`Only the host can change chat mode (${error.message}).`);
   });
 }
 
-
-/**
- * Handle provider selection change
- */
-function handleProviderChange() {
+function handleProviderChange(chatClient) {
   const selectedProvider = getSelectedProvider();
-  console.log(`Provider changed to: ${selectedProvider}`);
-  
-  // Update the provider in the provider abstraction layer
-  setCurrentProvider(selectedProvider);
-  
-  // Show a system message about the provider change
-  addToChatHistory({
-    type: 'system',
-    content: `Switched to ${selectedProvider === 'ollama' ? 'Ollama' : 'LM Studio'} provider`
-  });
-  
-  // Refresh models for the new provider
   setRefreshModelsLoading(true);
-  
-  fetchAvailableModels()
-    .then(() => {
-      addToChatHistory({
-        type: 'system',
-        content: `Loaded models from ${selectedProvider === 'ollama' ? 'Ollama' : 'LM Studio'}`
-      });
-    })
-    .catch(error => {
-      addToChatHistory({
-        type: 'system',
-        content: `Error loading models from ${selectedProvider === 'ollama' ? 'Ollama' : 'LM Studio'}: ${error.message}`
-      });
-    })
-    .finally(() => {
-      setRefreshModelsLoading(false);
-    });
+  chatClient.api.setProvider({ provider: selectedProvider }).catch((error) => {
+    systemMessage(`Could not switch provider: ${error.message}`);
+  }).finally(() => setRefreshModelsLoading(false));
 }
 
-/**
- * Handle refresh models button click
- */
-function handleRefreshModelsClick() {
-  // Add a visual indication that refresh is happening
+function handleRefreshModelsClick(chatClient) {
   setRefreshModelsLoading(true);
-  
-  // Show a system message in the chat
-  addToChatHistory({
-    type: 'system',
-    content: 'Refreshing available models...'
+  systemMessage('Refreshing available models...');
+  chatClient.api.refreshModels().catch((error) => {
+    systemMessage(`Error refreshing models: ${error.message}`);
+  }).finally(() => {
+    setRefreshModelsLoading(false);
+    updateRefreshModelsTooltip(`Last refreshed: ${new Date().toLocaleTimeString()}`);
   });
-  
-  // If we're connected as a peer to a host, we should request models from the host
-  if (!isSessionHost() && requestModelsFromHost()) {
-    // Set a timeout to clear loading state if no response is received
-    setTimeout(() => {
-      // Check if we're still loading (models weren't received)
-      if (refreshModelsButton && refreshModelsButton.classList.contains('refreshing')) {
-        setRefreshModelsLoading(false);
-        addToChatHistory({
-          type: 'system',
-          content: 'Timeout waiting for models from host. Please try again.'
-        });
-        updateRefreshModelsTooltip('Request timed out');
-      }
-    }, 10000); // 10 second timeout
-    
-    // The actual refresh will happen when we receive the models from the host
-    return;
-  }
-  
-  // Fetch the models
-  fetchAvailableModels()
-    .then(() => {
-      // Add success message
-      addToChatHistory({
-        type: 'system',
-        content: 'Model list refreshed successfully!'
-      });
-    })
-    .catch(error => {
-      // Add error message
-      addToChatHistory({
-        type: 'system',
-        content: `Error refreshing models: ${error.message}`
-      });
-    })
-    .finally(() => {
-      // Remove visual indication
-      setRefreshModelsLoading(false);
-      // Update timestamp on refresh button
-      updateRefreshModelsTooltip(`Last refreshed: ${new Date().toLocaleTimeString()}`);
-    });
 }
 
-/**
- * Handle persistence toggle checkbox
- * @param {Event} event - The change event
- */
 function handlePersistenceToggle(event) {
   const enabled = event.target.checked;
-  persistenceManager.setPersistenceEnabled(enabled);
-  
-  addToChatHistory({
-    type: 'system',
-    content: `💾 Chat history persistence ${enabled ? 'enabled' : 'disabled'}`
-  });
+  sessionStore.setPersistenceEnabled(enabled);
+  systemMessage(`💾 Chat history persistence ${enabled ? 'enabled' : 'disabled'}`);
 }
 
-/**
- * Handle export history button click
- */
 async function handleExportHistory() {
   try {
-    const success = await persistenceManager.downloadSessionExport();
-    if (!success) {
-      addToChatHistory({
-        type: 'system',
-        content: '⚠️ Failed to export chat history'
-      });
-    }
+    const success = await sessionStore.downloadSessionExport();
+    if (!success) systemMessage('⚠️ Failed to export chat history');
   } catch (error) {
-    console.error('Export error:', error);
-    addToChatHistory({
-      type: 'system',
-      content: `⚠️ Error exporting history: ${error.message}`
-    });
+    systemMessage(`⚠️ Error exporting history: ${error.message}`);
   }
 }
 
-/**
- * Handle clear history button click
- */
 async function handleClearHistory() {
-  // Confirm with user
-  const confirmed = confirm('Are you sure you want to clear all saved chat history? This cannot be undone.');
-  
-  if (!confirmed) {
-    return;
-  }
-  
+  if (!confirm('Are you sure you want to clear all saved chat history? This cannot be undone.')) return;
   try {
-    const success = await persistenceManager.clearPersistedMessages();
-    if (!success) {
-      addToChatHistory({
-        type: 'system',
-        content: '⚠️ Failed to clear chat history' 
-      });
-    }
+    clear();
+    clearAllSessions();
   } catch (error) {
-    console.error('Clear error:', error);
-    addToChatHistory({
-      type: 'system',
-      content: `⚠️ Error clearing history: ${error.message}`
-    });
+    systemMessage(`⚠️ Error clearing history: ${error.message}`);
   }
 }
 
-/**
- * Handle history browser toggle
- */
 function handleHistoryToggle() {
   historyBrowser.toggleHistoryBrowser();
 }
 
-/**
- * Handle session search input
- * @param {Event} event - The input event
- */
 function handleSessionSearch(event) {
-  const query = event.target.value;
-  historyBrowser.handleSessionSearch(query);
+  historyBrowser.handleSessionSearch(event.target.value);
 }
 
-// Export functions
 export {
   setupEventListeners,
   handleFormSubmit,

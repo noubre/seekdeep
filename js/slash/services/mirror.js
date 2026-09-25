@@ -1,6 +1,6 @@
-import { driveRpcClient } from '../../p2p/drive-rpc-client.js';
+import { rpcClient } from '../../p2p/rpc-client.js';
 
-function createMirrorService(client = driveRpcClient) {
+function createMirrorService(client = rpcClient) {
   if (!client || typeof client.request !== 'function') throw new TypeError('Mirror RPC client is required');
   return Object.freeze({
     start: (localRef, driveRef, options = {}) => client.request('mirror.start', {

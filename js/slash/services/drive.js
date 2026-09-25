@@ -1,6 +1,6 @@
-import { driveRpcClient } from '../../p2p/drive-rpc-client.js';
+import { rpcClient } from '../../p2p/rpc-client.js';
 
-function createDriveService(client = driveRpcClient) {
+function createDriveService(client = rpcClient) {
   if (!client || typeof client.request !== 'function') throw new TypeError('Drive RPC client is required');
   return Object.freeze({
     create: (name) => client.request('drive.create', { name }),

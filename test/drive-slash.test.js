@@ -87,7 +87,7 @@ test('/drive tag and service adapter keep backend, network, history, LLM, and pe
   const tag = await readFile(new URL('../js/slash/tags/drive.js', import.meta.url), 'utf8');
   const adapter = await readFile(new URL('../js/slash/services/drive.js', import.meta.url), 'utf8');
   const source = `${tag}\n${adapter}`;
-  for (const forbidden of ['hyperdrive-service', 'drive-runtime', '/network/', '/history', '/llm/', 'persistence-manager']) {
+  for (const forbidden of ['hyperdrive-service', 'worker-runtime', '/network/', '/history', '/llm/', 'persistence-manager']) {
     t.absent(source.includes(forbidden), forbidden);
   }
   t.absent(tag.includes('emitEphemeral'), 'handler returns results; only the registry dispatcher emits');

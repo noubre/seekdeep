@@ -1,9 +1,9 @@
 import test from 'brittle';
 import { Duplex, PassThrough } from 'node:stream';
 import { EventEmitter } from 'node:events';
-import { createJsonRpcServer } from '../js/p2p/drive-rpc-server.js';
-import { createDriveRpcClient } from '../js/p2p/drive-rpc-client.js';
-import { createDriveBackend, resolveDriveStorageRoot } from '../js/p2p/drive-runtime.js';
+import { createJsonRpcServer } from '../js/p2p/rpc-server.js';
+import { createRpcClient } from '../js/p2p/rpc-client.js';
+import { createWorkerBackend, resolveDriveStorageRoot } from '../js/p2p/worker-runtime.js';
 
 function duplexPair() {
   let a;
@@ -55,7 +55,7 @@ test('RPC client/server correlate concurrent replies and lazily reuse one Pear-c
   const [clientPipe, serverPipe] = duplexPair();
   let pipeCalls = 0;
   const server = createJsonRpcServer(serverPipe, methods);
-  const client = createDriveRpcClient({ pipeFactory() { pipeCalls += 1; return clientPipe; }, timeout: 1000 });
+  const client = createRpcClient({ pipeFactory() { pipeCalls += 1; return clientPipe; }, timeout: 1000 });
   t.teardown(async () => { client.close(); await server.close(); });
 
   const [list, get] = await Promise.all([
@@ -73,7 +73,7 @@ test('default client obtains globalThis.Pear.worker.pipe lazily and only once', 
   const previous = globalThis.Pear;
   let calls = 0;
   globalThis.Pear = { worker: { pipe() { calls += 1; return clientPipe; } } };
-  const client = createDriveRpcClient({ timeout: 1000 });
+  const client = createRpcClient({ timeout: 1000 });
   t.teardown(async () => {
     client.close();
     globalThis.Pear = previous;
@@ -88,7 +88,7 @@ test('default client obtains globalThis.Pear.worker.pipe lazily and only once', 
 test('RPC allowlists methods and rejects non-plain, accessor, and extra-field payloads', async function (t) {
   const [clientPipe, serverPipe] = duplexPair();
   const server = createJsonRpcServer(serverPipe, methods);
-  const client = createDriveRpcClient({ pipeFactory: () => clientPipe, timeout: 1000 });
+  const client = createRpcClient({ pipeFactory: () => clientPipe, timeout: 1000 });
   t.teardown(async () => { client.close(); await server.close(); });
 
   await t.exception.all(() => client.request('constructor', {}), /not allowed/i);
@@ -128,7 +128,7 @@ test('RPC enforces per-frame byte limits without rejecting coalesced valid frame
   t.is((await responses).length, 2, 'coalesced frames are measured individually');
 
   const [limitedClient] = duplexPair();
-  const client = createDriveRpcClient({ pipeFactory: () => limitedClient, timeout: 100, maxMessageBytes: 256 });
+  const client = createRpcClient({ pipeFactory: () => limitedClient, timeout: 100, maxMessageBytes: 256 });
   await t.exception.all(() => client.request('drive.get', { ref: 'docs', path: `/${'x'.repeat(400)}` }), /too large/i);
   client.close();
 });
@@ -139,7 +139,7 @@ test('RPC server rejects non-JSON results instead of throwing during serializati
     'drive.list': { validate: () => [], invoke: async () => ({ count: 1n }) }
   };
   const server = createJsonRpcServer(serverPipe, unsafeMethods);
-  const client = createDriveRpcClient({ pipeFactory: () => clientPipe, timeout: 1000 });
+  const client = createRpcClient({ pipeFactory: () => clientPipe, timeout: 1000 });
   t.teardown(async () => { client.close(); await server.close(); });
   await t.exception.all(() => client.request('drive.list', {}), /JSON data/i);
 });
@@ -149,7 +149,7 @@ test('RPC timeout, close, and stream error reject pending calls and a later requ
   const second = duplexPair();
   const server = createJsonRpcServer(second[1], methods);
   let index = 0;
-  const client = createDriveRpcClient({ pipeFactory: () => [first[0], second[0]][index++], timeout: 30 });
+  const client = createRpcClient({ pipeFactory: () => [first[0], second[0]][index++], timeout: 30 });
   t.teardown(async () => { client.close(); first[1].destroy(); await server.close(); });
 
   await t.exception.all(() => client.request('drive.list', {}), /timed out/i);
@@ -162,7 +162,7 @@ test('RPC timeout, close, and stream error reject pending calls and a later requ
   await t.exception.all(() => pendingClose, /closed/i);
 
   const errorPair = duplexPair();
-  const errorClient = createDriveRpcClient({ pipeFactory: () => errorPair[0], timeout: 1000 });
+  const errorClient = createRpcClient({ pipeFactory: () => errorPair[0], timeout: 1000 });
   const pendingError = errorClient.request('drive.list', {});
   errorPair[0].emit('error', new Error('forced pipe failure'));
   await t.exception.all(() => pendingError, /forced pipe failure/i);
@@ -175,7 +175,7 @@ test('malformed peer data rejects all pending work without process errors and re
   const second = duplexPair();
   const server = createJsonRpcServer(second[1], methods);
   let pipeIndex = 0;
-  const client = createDriveRpcClient({
+  const client = createRpcClient({
     pipeFactory: () => [first[0], second[0]][pipeIndex++],
     timeout: 1000
   });
@@ -223,7 +223,7 @@ test('async pipe write errors promptly reject the originating request and every 
     return true;
   };
   pipe.end = () => {};
-  const client = createDriveRpcClient({ pipeFactory: () => pipe, timeout: 1000 });
+  const client = createRpcClient({ pipeFactory: () => pipe, timeout: 1000 });
   t.teardown(() => client.close());
 
   const requests = [
@@ -246,7 +246,7 @@ test('RPC client caps pending requests before writing more work', async function
   let writes = 0;
   pipe.write = (_frame, callback) => { writes += 1; callback(); return true; };
   pipe.end = () => {};
-  const client = createDriveRpcClient({ pipeFactory: () => pipe, timeout: 1000, maxPendingRequests: 2 });
+  const client = createRpcClient({ pipeFactory: () => pipe, timeout: 1000, maxPendingRequests: 2 });
   const first = client.request('drive.list', {});
   const second = client.request('drive.list', {});
   await t.exception.all(() => client.request('drive.list', {}), /pending request limit/i);
@@ -303,7 +303,7 @@ test('runtime storage resolution is app-scoped and backend shutdown is idempoten
   const end = pipe.end.bind(pipe);
   pipe.end = (...args) => { pipeEnds += 1; return end(...args); };
   const service = { close: async () => { serviceCloses += 1; } };
-  const backend = createDriveBackend(pipe, { service });
+  const backend = createWorkerBackend(pipe, { service });
   await Promise.all([backend.close(), backend.close()]);
   t.is(serviceCloses, 1);
   t.is(pipeEnds, 1);
@@ -313,7 +313,7 @@ test('backend shutdown still closes the service when RPC shutdown fails', async 
   const pipe = new PassThrough();
   pipe.end = () => { throw new Error('forced pipe close failure'); };
   let serviceCloses = 0;
-  const backend = createDriveBackend(pipe, { service: { close: async () => { serviceCloses += 1; } } });
+  const backend = createWorkerBackend(pipe, { service: { close: async () => { serviceCloses += 1; } } });
   await t.exception.all(() => backend.close(), /shutdown failed/i);
   t.is(serviceCloses, 1);
   pipe.destroy();
@@ -336,8 +336,8 @@ test('backend shutdown drains an in-flight RPC operation before closing drive st
     },
     async close() { events.push('service-close'); }
   };
-  const backend = createDriveBackend(serverPipe, { service });
-  const client = createDriveRpcClient({ pipeFactory: () => clientPipe, timeout: 1000 });
+  const backend = createWorkerBackend(serverPipe, { service });
+  const client = createRpcClient({ pipeFactory: () => clientPipe, timeout: 1000 });
   const request = client.request('drive.list', {}).catch((error) => error);
   await started;
   const closing = backend.close();

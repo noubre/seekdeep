@@ -1,7 +1,7 @@
 import test from 'brittle';
 import { Duplex } from 'node:stream';
-import { createJsonRpcServer, createResourceRpcMethods } from '../js/p2p/drive-rpc-server.js';
-import { createDriveRpcClient } from '../js/p2p/drive-rpc-client.js';
+import { createJsonRpcServer, createResourceRpcMethods } from '../js/p2p/rpc-server.js';
+import { createRpcClient } from '../js/p2p/rpc-client.js';
 
 function duplexPair() {
   let a;
@@ -24,7 +24,7 @@ test('Localdrive RPC methods are allowlisted and exactly validated', async funct
   };
   const [clientPipe, serverPipe] = duplexPair();
   const server = createJsonRpcServer(serverPipe, createResourceRpcMethods({ drive: {}, localdrive }));
-  const client = createDriveRpcClient({ pipeFactory: () => clientPipe, timeout: 1000 });
+  const client = createRpcClient({ pipeFactory: () => clientPipe, timeout: 1000 });
   t.teardown(async () => { client.close(); await server.close(); });
 
   await client.request('localdrive.add', { name: 'docs', root: '@storage/docs', writable: true });
@@ -51,7 +51,7 @@ test('Localdrive RPC redacts filesystem errors and returns operation-specific sa
   const localdrive = { get: async () => { throw error; } };
   const [clientPipe, serverPipe] = duplexPair();
   const server = createJsonRpcServer(serverPipe, createResourceRpcMethods({ drive: {}, localdrive }));
-  const client = createDriveRpcClient({ pipeFactory: () => clientPipe, timeout: 1000 });
+  const client = createRpcClient({ pipeFactory: () => clientPipe, timeout: 1000 });
   t.teardown(async () => { client.close(); await server.close(); });
 
   const result = await Promise.allSettled([client.request('localdrive.get', { ref: 'docs', path: '/x' })]);
