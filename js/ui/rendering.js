@@ -4,9 +4,66 @@
  */
 import { chatMessagesEl, activeUsersEl } from './elements.js';
 import { getActivePeers } from '../session/peers.js';
-import { formatThinkingContent, containsMarkdown, renderMarkdown } from '../messages/formatting.js';
+import { renderAssistantContent } from '../messages/formatting.js';
 import { getChatHistory } from '../messages/history.js';
 import { PEER_COLORS } from '../session/peers.js';
+import {
+  ensureChatLog,
+  getEphemeralAnchor,
+  getHistoryMessageId,
+  isNearBottom,
+  setHistoryMessageId,
+  scrollToBottom
+} from './ephemeral.js';
+
+function captureScrollPosition(chatLog) {
+  const containerRect = chatLog.getBoundingClientRect();
+  const visibleMessage = Array.from(chatLog.children).find((child) => {
+    if (!child.classList.contains('message')) return false;
+    const rect = child.getBoundingClientRect();
+    return rect.bottom > containerRect.top && rect.top < containerRect.bottom;
+  });
+
+  return {
+    shouldFollow: isNearBottom(chatLog),
+    scrollTop: chatLog.scrollTop,
+    scrollHeight: chatLog.scrollHeight,
+    anchor: visibleMessage && {
+      element: visibleMessage.classList.contains('message-ephemeral')
+        ? visibleMessage
+        : null,
+      historyId: getHistoryMessageId(visibleMessage),
+      offset: visibleMessage.getBoundingClientRect().top - containerRect.top
+    }
+  };
+}
+
+function restoreScrollPosition(chatLog, position) {
+  if (position.shouldFollow) {
+    // Restore immediately so another streaming update in the same frame still
+    // sees the reader at the bottom, then repeat after layout settles.
+    chatLog.scrollTop = chatLog.scrollHeight;
+    scrollToBottom(chatLog);
+    return;
+  }
+
+  let anchorEl = position.anchor?.element;
+  if (anchorEl?.parentElement !== chatLog && position.anchor?.historyId) {
+    anchorEl = Array.from(chatLog.children).find((child) => (
+      getHistoryMessageId(child) === position.anchor.historyId
+    ));
+  }
+
+  if (anchorEl?.parentElement === chatLog) {
+    const containerTop = chatLog.getBoundingClientRect().top;
+    const currentOffset = anchorEl.getBoundingClientRect().top - containerTop;
+    chatLog.scrollTop += currentOffset - position.anchor.offset;
+    return;
+  }
+
+  chatLog.scrollTop = position.scrollTop
+    + (chatLog.scrollHeight - position.scrollHeight);
+}
 
 /**
  * Create a message element to add to the chat
@@ -16,33 +73,17 @@ import { PEER_COLORS } from '../session/peers.js';
 function createMessageElement(message) {
   const messageEl = document.createElement('div');
   messageEl.classList.add('message');
+  setHistoryMessageId(messageEl, message.id);
   
   console.log("Creating message element for:", message);
   
-  // We'll now process the content differently based on message type
-  let messageContent = '';
-  
-  if (message.type === 'assistant') {
-    // For assistant messages, always use the raw content if available
-    // This ensures thinking content is properly rendered
-    if (message.rawContent) {
-      // Process the raw content to properly format thinking tags
-      messageContent = formatThinkingContent(message.rawContent);
-    } else {
-      // If no raw content, fall back to regular content
-      messageContent = message.content || '';
-    }
-  } else {
-    // For non-assistant messages, just use the content
-    messageContent = message.content || '';
-  }
+  const messageContent = message.content || '';
   
   switch (message.type) {
     case 'user': {
       messageEl.classList.add('user-message');
       
-      // In private mode, all user messages are from "You"
-      const sender = 'You';
+      const sender = message.fromPeer || 'You';
       
       // Create header
       const userHeader = document.createElement('div');
@@ -65,8 +106,7 @@ function createMessageElement(message) {
       const assistantHeader = document.createElement('div');
       assistantHeader.classList.add('message-header');
       
-      // Get model name from the current model
-      const modelName = message.modelName || 'AI Assistant';
+      const modelName = message.modelName || (message.fromPeer ? `${message.fromPeer}'s AI` : 'AI Assistant');
       assistantHeader.textContent = modelName;
       
       messageEl.appendChild(assistantHeader);
@@ -75,12 +115,7 @@ function createMessageElement(message) {
       const assistantBody = document.createElement('div');
       assistantBody.classList.add('message-body');
       
-      // Render Markdown if content seems to contain it
-      if (containsMarkdown(messageContent) || messageContent.includes('<div class="thinking-content">')) {
-        assistantBody.innerHTML = renderMarkdown(messageContent);
-      } else {
-        assistantBody.innerHTML = messageContent.replace(/\n/g, '<br>');
-      }
+      assistantBody.innerHTML = renderAssistantContent(message.rawContent || messageContent);
       
       messageEl.appendChild(assistantBody);
       break;
@@ -112,80 +147,61 @@ function createMessageElement(message) {
  * Update the chat display from the history
  * @param {boolean} forceFullRender - Force a complete re-render of all messages
  */
-function updateChatDisplay(forceFullRender = false) {
+function updateChatDisplay(_forceFullRender = false) {
   if (!chatMessagesEl) return;
-  
+
+  ensureChatLog(chatMessagesEl);
+  const scrollPosition = captureScrollPosition(chatMessagesEl);
   const chatHistory = getChatHistory();
   console.log(`Length of chat history: ${chatHistory.length}`);
-  
-  // If we need a full render or the DOM is empty, do a complete rebuild
-  if (forceFullRender || chatMessagesEl.children.length === 0) {
-    // Clear current display
-    chatMessagesEl.innerHTML = '';
-    
-    // Keep track of the last message type to avoid duplicates
-    let lastMessageType = null;
-    let lastMessageContent = null;
 
-    for (const message of chatHistory) {
-      // Skip duplicate consecutive assistant messages
-      if (message.type === 'assistant' && lastMessageType === 'assistant' && message.content === lastMessageContent) {
-        console.log(`Skipping duplicate consecutive message in display: ${message.content}`);
-        continue;
-      }
-      
-      // Create and append message element
-      const messageEl = createMessageElement(message);
-      chatMessagesEl.appendChild(messageEl);
-      
-      lastMessageType = message.type;
-      lastMessageContent = message.content;
-    }
-    
-    console.log("Before scroll - scrollTop:", chatMessagesEl.scrollTop, "scrollHeight:", chatMessagesEl.scrollHeight);
-    // Scroll to the bottom using requestAnimationFrame
-    requestAnimationFrame(() => {
-      chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
-      console.log("After scroll - scrollTop:", chatMessagesEl.scrollTop, "scrollHeight:", chatMessagesEl.scrollHeight);
-    });
-  } else {
-    // For streaming updates, just update the last assistant message if it exists
-    const lastMessage = chatHistory[chatHistory.length - 1];
-    if (lastMessage && lastMessage.type === 'assistant' && lastMessage.requestId) {
-      // Find the existing assistant message element with this request ID
-      const existingEl = chatMessagesEl.querySelector(`.assistant-message[data-request-id="${lastMessage.requestId}"]`);
-      if (existingEl) {
-        // Update the existing element's content
-        const messageBody = existingEl.querySelector('.message-body');
-        if (messageBody) {
-          let messageContent = '';
-          if (lastMessage.rawContent) {
-            messageContent = formatThinkingContent(lastMessage.rawContent);
-          } else {
-            messageContent = lastMessage.content || '';
-          }
-          
-          // Render Markdown if content seems to contain it
-          if (containsMarkdown(messageContent) || messageContent.includes('<div class="thinking-content">')) {
-            messageBody.innerHTML = renderMarkdown(messageContent);
-          } else {
-            messageBody.innerHTML = messageContent.replace(/\n/g, '<br>');
-          }
-          
-          // Scroll to bottom if we're near the bottom
-          const isNearBottom = chatMessagesEl.scrollTop + chatMessagesEl.clientHeight >= chatMessagesEl.scrollHeight - 50;
-          if (isNearBottom) {
-            requestAnimationFrame(() => {
-              chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
-            });
-          }
-        }
-      } else {
-        // If we can't find the existing element, fall back to full render
-        updateChatDisplay(true);
-      }
+  const ephemeralMessages = Array.from(chatMessagesEl.children)
+    .filter((child) => child.classList.contains('message-ephemeral'));
+
+  // Reconcile only persisted message nodes. Local results stay attached at
+  // their fixed history boundaries, including during full and stream renders.
+  for (const child of Array.from(chatMessagesEl.children)) {
+    if (child.classList.contains('message')
+        && !child.classList.contains('message-ephemeral')) {
+      child.remove();
     }
   }
+
+  let lastMessageType = null;
+  let lastMessageContent = null;
+  const renderedMessages = [];
+
+  for (const message of chatHistory) {
+    if (message.type === 'assistant'
+        && lastMessageType === 'assistant'
+        && message.content === lastMessageContent) {
+      console.log(`Skipping duplicate consecutive message in display: ${message.content}`);
+      continue;
+    }
+
+    renderedMessages.push(message);
+    lastMessageType = message.type;
+    lastMessageContent = message.content;
+  }
+
+  const retainedBoundaries = new Map(renderedMessages.map((message, index) => (
+    [message.id, index + 1]
+  )));
+  let renderedIndex = 0;
+
+  for (const message of renderedMessages) {
+    const messageEl = createMessageElement(message);
+    const nextEphemeral = ephemeralMessages.find((ephemeral) => {
+      const anchor = getEphemeralAnchor(ephemeral);
+      const boundary = retainedBoundaries.get(anchor?.afterId) || 0;
+      return boundary > renderedIndex;
+    });
+
+    chatMessagesEl.insertBefore(messageEl, nextEphemeral || null);
+    renderedIndex += 1;
+  }
+
+  restoreScrollPosition(chatMessagesEl, scrollPosition);
 }
 
 /**

@@ -137,7 +137,17 @@ async function ask(model, prompt) {
             updateChatDisplay(); // Trigger UI update
           }
 
-          // In private mode, we don't broadcast responses to peers
+          if (isSessionHost() && getCollaborativeMode()) {
+            broadcastToPeers({
+              type: 'response',
+              requestId,
+              data: responseChunk,
+              isComplete: false,
+              isJson: false,
+              isPrivate: false,
+              fromPeerId: 'host'
+            }, null, null, true);
+          }
         } catch (parseError) {
           console.warn("Error parsing chunk as JSON:", parseError);
           // If not valid JSON, use the parseOllamaResponse as a fallback
@@ -182,7 +192,17 @@ async function ask(model, prompt) {
         updateChatDisplay(); // Trigger UI update
       }
 
-      // In private mode, we don't send completion signals to peers
+      if (isSessionHost() && getCollaborativeMode()) {
+        broadcastToPeers({
+          type: 'response',
+          requestId,
+          data: '',
+          isComplete: true,
+          isJson: false,
+          isPrivate: false,
+          fromPeerId: 'host'
+        }, null, null, true);
+      }
 
       // Store this requestId as our activeRequestId
       setActiveRequestId(requestId);
@@ -436,6 +456,18 @@ async function streamResponseToPeer(conn, model, prompt, requestId, peerId) {
                   break;
                 }
               }
+
+              if (getCollaborativeMode()) {
+                broadcastToPeers({
+                  type: 'response',
+                  requestId: requestId,
+                  data: responseChunk,
+                  isComplete: false,
+                  isJson: false,
+                  isPrivate: false,
+                  fromPeerId: peerId
+                }, null, peerId, true);
+              }
             }
           } catch (innerErr) {
             // If a line can't be parsed as JSON, ignore it
@@ -468,6 +500,18 @@ async function streamResponseToPeer(conn, model, prompt, requestId, peerId) {
               break;
             }
           }
+
+          if (getCollaborativeMode()) {
+            broadcastToPeers({
+              type: 'response',
+              requestId: requestId,
+              data: fallbackResponse,
+              isComplete: false,
+              isJson: false,
+              isPrivate: false,
+              fromPeerId: peerId
+            }, null, peerId, true);
+          }
         }
       }
     }
@@ -490,6 +534,18 @@ async function streamResponseToPeer(conn, model, prompt, requestId, peerId) {
         console.log("Sent completion signal to peer for requestId:", requestId);
         break;
       }
+    }
+
+    if (getCollaborativeMode()) {
+      broadcastToPeers({
+        type: 'response',
+        requestId: requestId,
+        data: '',
+        isComplete: true,
+        isJson: false,
+        isPrivate: false,
+        fromPeerId: peerId
+      }, null, peerId, true);
     }
 
     console.log("Complete streamed response text for peer:", fullResponseText);

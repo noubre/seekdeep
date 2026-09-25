@@ -4,8 +4,9 @@
  */
 import { addToChatHistory } from '../messages/history.js';
 import { updateActivePeer, getPeerDisplayName, isPeerHost } from '../session/peers.js';
-import { isSessionHost, getCollaborativeMode } from '../session/modes.js';
+import { isSessionHost, getCollaborativeMode, setCollaborativeMode } from '../session/modes.js';
 import { updateModelSelect, shareModelsWithPeer } from '../llm/models.js';
+import { setChatModeSelectValue } from '../ui/elements.js';
 import { handlePeerQuery } from '../llm/provider.js';
 import { conns, findHostConnection } from './hyperswarm.js';
 import { 
@@ -46,8 +47,7 @@ function setupPeerMessageHandler(conn, peerId) {
         break;
         
       case 'mode_update':
-        // Mode updates are no longer needed since we're always in private mode
-        console.log('Ignoring mode update message - always in private mode');
+        handleModeUpdateMessage(message, peerId);
         break;
         
       case 'models_update':
@@ -67,8 +67,7 @@ function setupPeerMessageHandler(conn, peerId) {
         break;
         
       case 'peer_message':
-        // Peer messages are no longer processed since we're always in private mode
-        console.log('Ignoring peer message - always in private mode');
+        handlePeerMessage(message, peerId);
         break;
         
       default:
@@ -157,6 +156,40 @@ function handleHandshakeAckMessage(message, peerId) {
  * Handle a models update message from a peer
  * @param {Object} message - The models update message
  */
+function handleModeUpdateMessage(message, peerId) {
+  const nextMode = Boolean(message.isCollaborativeMode);
+  setCollaborativeMode(nextMode);
+  setChatModeSelectValue(nextMode);
+
+  addToChatHistory({
+    type: 'system',
+    content: `Host changed chat mode to ${nextMode ? 'Collaborative' : 'Private'}.`
+  });
+
+  console.log(`[PEER] Mode update from ${peerId.slice(0, 8)}...: ${nextMode ? 'Collaborative' : 'Private'}`);
+}
+
+function handlePeerMessage(message, peerId) {
+  if (!getCollaborativeMode()) {
+    console.log('Ignoring peer_message while in private mode');
+    return;
+  }
+
+  const messageType = message.messageType || message.content?.type || 'system';
+  const content = typeof message.content === 'object' ? (message.content.message || message.content.content || '') : (message.content || '');
+  const fromPeer = message.fromPeer || message.content?.fromPeer || `Peer${peerId.slice(0, 6)}`;
+
+  if (!content) return;
+
+  addToChatHistory({
+    type: messageType,
+    content,
+    fromPeer,
+    peerId,
+    requestId: message.requestId
+  });
+}
+
 function handleModelsUpdateMessage(message) {
   console.log(`[PEER] Received ${message.models ? message.models.length : 0} models from host:`, 
     message.models ? message.models.map(m => m.name).join(', ') : 'No models');
@@ -253,10 +286,11 @@ function handleResponseMessage(message) {
   console.log("Received response message:", message);
   console.log("Current activeRequestId:", getActiveRequestId());
   
-  // Check if this is one of our active requests
+  // Check if this is one of our active requests, or a shared collaborative response.
   const isActiveReq = isActiveRequest(message.requestId);
+  const isSharedCollaborativeResponse = getCollaborativeMode() && message.isPrivate === false;
   
-  if (isActiveReq) {
+  if (isActiveReq || isSharedCollaborativeResponse) {
     console.log("Processing response for matching request ID:", message.requestId);
     let responseContent = '';
     if (message.isJson) {

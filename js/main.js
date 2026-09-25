@@ -5,6 +5,7 @@
 import * as ui from './ui/elements.js';
 // import * as rendering from './ui/rendering.js';
 import * as events from './ui/events.js';
+import { initializeComposerDiscovery } from './ui/composer-discovery.js';
 import * as historyBrowser from './ui/history-browser.js';
 import * as hyperswarm from './network/hyperswarm.js';
 // import * as messaging from './network/messaging.js';
@@ -16,6 +17,7 @@ import * as provider from './llm/provider.js';
 import * as modes from './session/modes.js';
 // import * as peers from './session/peers.js';
 import * as persistenceManager from './messages/persistence-manager.js';
+import { parseBootstrapArgs } from './network/bootstrap-args.js';
 
 // Initialize the application
 function initializeApp() {
@@ -24,12 +26,17 @@ function initializeApp() {
   // Initialize UI elements
   ui.initializeElements();
   ui.initializeCopyButton();
+  initializeComposerDiscovery();
   
   // Initialize history browser
   historyBrowser.initializeHistoryBrowser();
   
   // Initialize network
-  hyperswarm.initializeSwarm();
+  const bootstrap = parseBootstrapArgs(globalThis.Pear?.config?.args);
+  hyperswarm.initializeSwarm({ bootstrap });
+  if (bootstrap.length) {
+    console.log('[Main] Using local DHT bootstrap:', bootstrap.map((node) => `${node.host}:${node.port}`).join(', '));
+  }
   
   // Set up topic display updates
   const updateTopic = () => {

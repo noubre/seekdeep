@@ -17,15 +17,30 @@ import {
   getTopicKeyValue,
   clearTopicKeyInput,
   setRefreshModelsLoading,
-  updateRefreshModelsTooltip
+  updateRefreshModelsTooltip,
+  isCollaborativeModeSelected,
+  setChatModeSelectValue,
+  setChatModeSelectEnabled,
+  chatModeSelect,
+  chatMessagesEl
 } from './elements.js';
 import { addToChatHistory } from '../messages/history.js';
 import { joinExistingChat } from '../network/hyperswarm.js';
-import { isSessionHost } from '../session/modes.js';
+import { broadcastToPeers } from '../network/messaging.js';
+import { isSessionHost, getCollaborativeMode, setCollaborativeMode } from '../session/modes.js';
 import { fetchAvailableModels, requestModelsFromHost } from '../llm/models.js';
 import { ask, setCurrentProvider } from '../llm/provider.js';
 import * as persistenceManager from '../messages/persistence-manager.js';
 import * as historyBrowser from './history-browser.js';
+import { dispatchSlashTag } from '../slash/registry.js';
+import { createEphemeralRenderer } from './ephemeral.js';
+import { routePromptSubmission } from './submit-routing.js';
+import { swarmService } from '../slash/services/swarm.js';
+import { dhtService } from '../slash/services/dht.js';
+import { driveService } from '../slash/services/drive.js';
+import { localdriveService } from '../slash/services/localdrive.js';
+import { mirrorService } from '../slash/services/mirror.js';
+import { beamService } from '../slash/services/beam.js';
 
 /**
  * Set up all event listeners for the UI
@@ -90,7 +105,12 @@ function setupEventListeners() {
     topicKeyInput.addEventListener('keydown', handleTopicKeyInputKeydown);
   }
   
-  // Chat mode selector has been removed - no longer needed
+  // Chat mode selector change handler
+  if (chatModeSelect) {
+    chatModeSelect.addEventListener('change', handleChatModeChange);
+    setChatModeSelectValue(getCollaborativeMode());
+    setChatModeSelectEnabled(isSessionHost());
+  }
   
   // Provider selection change handler
   if (providerSelect) {
@@ -115,14 +135,15 @@ async function handleFormSubmit(event) {
     return;
   }
   
-  // Get the selected model
-  const model = getSelectedModel();
-  
-  // Clear the prompt area
-  clearPromptArea();
-  
-  // Process the prompt (this will add messages to chat history)
-  await ask(model, prompt);
+  const emitEphemeral = createEphemeralRenderer(chatMessagesEl);
+  await routePromptSubmission(prompt, {
+    dispatchSlashTag,
+    emitEphemeral,
+    services: { swarm: swarmService, dht: dhtService, drive: driveService, localdrive: localdriveService, mirror: mirrorService, beam: beamService },
+    getSelectedModel,
+    clearPromptArea,
+    ask
+  });
 }
 
 /**
@@ -151,6 +172,7 @@ function handleJoinButtonClick() {
     if (success) {
       // Clear the input after joining
       clearTopicKeyInput();
+      setChatModeSelectEnabled(false);
     } else {
       // If joining failed, show an error message
       addToChatHistory({
@@ -175,6 +197,33 @@ function handleTopicKeyInputKeydown(event) {
     event.preventDefault();
     joinButton.click();
   }
+}
+
+/**
+ * Handle chat mode changes. Only the host can change room visibility.
+ */
+function handleChatModeChange() {
+  const requestedMode = isCollaborativeModeSelected();
+
+  if (!isSessionHost()) {
+    setChatModeSelectValue(getCollaborativeMode());
+    addToChatHistory({
+      type: 'system',
+      content: 'Only the host can change chat mode.'
+    });
+    return;
+  }
+
+  setCollaborativeMode(requestedMode);
+  broadcastToPeers({
+    type: 'mode_update',
+    isCollaborativeMode: requestedMode
+  }, null, null, true);
+
+  addToChatHistory({
+    type: 'system',
+    content: `Chat mode changed to ${requestedMode ? 'Collaborative' : 'Private'}.`
+  });
 }
 
 
@@ -357,6 +406,7 @@ export {
   handlePromptKeydown,
   handleJoinButtonClick,
   handleTopicKeyInputKeydown,
+  handleChatModeChange,
   handleProviderChange,
   handleRefreshModelsClick,
   handlePersistenceToggle,

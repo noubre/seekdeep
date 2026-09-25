@@ -87,6 +87,31 @@
       border-radius: 8px;
       max-width: 90%;
     }
+
+    .message-ephemeral {
+      background-color: #2B3445;
+      border: 1px dashed #81A1C1;
+      color: #D8DEE9;
+      margin: 8px auto;
+      max-width: 90%;
+      white-space: pre-wrap;
+    }
+
+    .message-ephemeral.ephemeral-error {
+      border-color: #BF616A;
+    }
+
+    .message-ephemeral.ephemeral-placeholder {
+      border-color: #EBCB8B;
+    }
+
+    .ephemeral-label {
+      color: #88C0D0;
+      font-size: 0.75em;
+      font-weight: 600;
+      margin-bottom: 5px;
+      text-transform: uppercase;
+    }
     
     .user-message {
       background-color: #4A6BBF;
@@ -384,6 +409,39 @@
       font-size: 14px;
       margin: 4px;
       border-radius: 4px;
+    }
+
+    .composer-discovery {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0 4px;
+      color: #AAB2C0;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    #slash-command-hint {
+      flex: 1;
+    }
+
+    #slash-help-button {
+      flex: none;
+      padding: 4px 8px;
+      border: 1px solid #4C566A;
+      border-radius: 4px;
+      background-color: transparent;
+      color: #D8DEE9;
+      font: inherit;
+    }
+
+    #slash-help-button:hover {
+      background-color: #3B4252;
+    }
+
+    #slash-help-button:focus-visible {
+      outline: 2px solid #88C0D0;
+      outline-offset: 2px;
     }
     
     input {
@@ -960,7 +1018,7 @@
         You
       </div>
     </div>
-    <div id="chat-messages">
+    <div id="chat-messages" role="log" aria-live="polite" aria-relevant="additions text">
       <!-- Chat messages will be added here dynamically -->
     </div>
   </div>
@@ -989,6 +1047,13 @@
         </svg>
       </button>
     </div>
+    <div class="model-control mode-toggle">
+      <label for="chat-mode">Mode:</label>
+      <select id="chat-mode" name="chat-mode">
+        <option value="private">Private — only requester sees responses</option>
+        <option value="collaborative">Collaborative — everyone sees prompts and responses</option>
+      </select>
+    </div>
     <div class="model-control" style="border-top: 1px solid #3B4252; padding-top: 8px; margin-top: 8px;">
       <label style="display: flex; align-items: center; cursor: pointer; user-select: none;">
         <input type="checkbox" id="persistence-enabled" checked style="margin-right: 6px; cursor: pointer;">
@@ -1008,7 +1073,11 @@
         </svg>
       </button>
     </div>
-    <textarea name="prompt" placeholder="Type your message here... (Ctrl+Enter to send)"></textarea>
+    <textarea name="prompt" aria-label="Message prompt" aria-describedby="slash-command-hint" placeholder="Type your message here... (Ctrl+Enter to send)"></textarea>
+    <div class="composer-discovery">
+      <span id="slash-command-hint">Slash command details are loading.</span>
+      <button type="button" id="slash-help-button" aria-label="Insert /p2p help into the message prompt">Help</button>
+    </div>
     <div style="float:right; margin-top: 8px;">
       <input type="submit" value="Seek" style="background-color: #5E81AC; border: none; padding: 8px 15px; border-radius: 4px; color: white; cursor: pointer;">
     </div>

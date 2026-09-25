@@ -160,6 +160,19 @@ async function ask(model, prompt) {
                   lastAssistantMessage.currentReasoningContent = assistantMessage.currentReasoningContent;
                   updateChatDisplay(); // Trigger UI update
                 }
+
+                if (isSessionHost() && getCollaborativeMode()) {
+                  broadcastToPeers({
+                    type: 'response',
+                    requestId,
+                    data: `<think>${assistantMessage.currentReasoningContent}</think>`,
+                    isComplete: false,
+                    isJson: false,
+                    isPrivate: false,
+                    fromPeerId: 'host',
+                    isReasoningUpdate: true
+                  }, null, null, true);
+                }
               }
               
               // Handle regular content
@@ -181,6 +194,18 @@ async function ask(model, prompt) {
                   lastAssistantMessage.rawContent = assistantMessage.rawContent;
                   lastAssistantMessage.content = assistantMessage.content;
                   updateChatDisplay(); // Trigger UI update
+                }
+
+                if (isSessionHost() && getCollaborativeMode()) {
+                  broadcastToPeers({
+                    type: 'response',
+                    requestId,
+                    data: responseChunk,
+                    isComplete: false,
+                    isJson: false,
+                    isPrivate: false,
+                    fromPeerId: 'host'
+                  }, null, null, true);
                 }
               }
             } catch (parseError) {
@@ -205,6 +230,18 @@ async function ask(model, prompt) {
         // Update the existing message one last time to ensure final state is rendered
         lastAssistantMessage.isComplete = true;
         updateChatDisplay(); // Trigger UI update
+      }
+
+      if (isSessionHost() && getCollaborativeMode()) {
+        broadcastToPeers({
+          type: 'response',
+          requestId,
+          data: '',
+          isComplete: true,
+          isJson: false,
+          isPrivate: false,
+          fromPeerId: 'host'
+        }, null, null, true);
       }
 
       // Store this requestId as our activeRequestId
@@ -453,6 +490,19 @@ async function streamResponseToPeer(conn, model, prompt, requestId, peerId) {
                   break;
                 }
               }
+
+              if (getCollaborativeMode()) {
+                broadcastToPeers({
+                  type: 'response',
+                  requestId: requestId,
+                  data: `<think>${currentReasoningContent}</think>`,
+                  isComplete: false,
+                  isJson: false,
+                  isPrivate: false,
+                  fromPeerId: peerId,
+                  isReasoningUpdate: true
+                }, null, peerId, true);
+              }
               
               // Update the full response text with the accumulated reasoning
               fullResponseText = updatedResponseText;
@@ -485,6 +535,18 @@ async function streamResponseToPeer(conn, model, prompt, requestId, peerId) {
                   break;
                 }
               }
+
+              if (getCollaborativeMode()) {
+                broadcastToPeers({
+                  type: 'response',
+                  requestId: requestId,
+                  data: responseChunk,
+                  isComplete: false,
+                  isJson: false,
+                  isPrivate: false,
+                  fromPeerId: peerId
+                }, null, peerId, true);
+              }
             }
           } catch (parseError) {
             console.warn("Error parsing LM Studio chunk as JSON:", parseError);
@@ -511,6 +573,18 @@ async function streamResponseToPeer(conn, model, prompt, requestId, peerId) {
         console.log("Sent LM Studio completion signal to peer for requestId:", requestId);
         break;
       }
+    }
+
+    if (getCollaborativeMode()) {
+      broadcastToPeers({
+        type: 'response',
+        requestId: requestId,
+        data: '',
+        isComplete: true,
+        isJson: false,
+        isPrivate: false,
+        fromPeerId: peerId
+      }, null, peerId, true);
     }
 
     console.log("Complete streamed response text from LM Studio for peer:", fullResponseText);

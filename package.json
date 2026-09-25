@@ -1,6 +1,6 @@
 {
   "name": "seekdeep",
-  "main": "index.html",
+  "main": "index.js",
   "pear": {
     "name": "seekdeep",
     "type": "desktop",
@@ -12,13 +12,44 @@
       "backgroundColor": "#1F2430",
       "height": "540",
       "width": "720"
-    }
+    },
+    "pre": "pear-electron/pre",
+    "routes": "."
   },
   "type": "module",
   "license": "Apache-2.0",
+  "private": false,
+  "version": "0.1.0",
+  "description": "P2P desktop chat that proxies local LLM providers (Ollama, LM Studio) and shares a room over Hyperswarm.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/noubre/seekdeep.git"
+  },
+  "homepage": "https://github.com/noubre/seekdeep#readme",
+  "bugs": {
+    "url": "https://github.com/noubre/seekdeep/issues"
+  },
+  "engines": {
+    "node": ">=22.17.0"
+  },
+  "files": [
+    "index.js",
+    "server.js",
+    "js/",
+    "css/",
+    "lib/",
+    "screenshots/",
+    "LICENSE",
+    "README.md"
+  ],
   "scripts": {
     "start": "pear run .",
-    "test": "node test/app.test.js && node test/server.test.js && node test/integration.test.js && node test/e2e.test.js",
+    "test": "node test/app.test.js && node test/server.test.js && node test/integration.test.js && node test/e2e.test.js && node test/collaborative-security.test.js && node test/slash-parser.test.js && node test/slash-registry.test.js && node test/slash-ui.test.js && node test/swarm-slash.test.js && node test/dht-slash.test.js && node test/bootstrap-args.test.js && npm run test:p2p",
+    "test:p2p": "node test/p2p-resource-registry.test.js && npm run test:drive && npm run test:localdrive && npm run test:mirror && npm run test:beam",
+    "test:drive": "node test/hyperdrive-service.test.js && node test/drive-rpc.test.js && node test/drive-slash.test.js",
+    "test:localdrive": "node test/localdrive-service.test.js && node test/localdrive-rpc.test.js && node test/localdrive-slash.test.js",
+    "test:mirror": "node test/mirror-service.test.js && node test/mirror-rpc.test.js && node test/mirror-slash.test.js",
+    "test:beam": "node test/beam-service.test.js && node test/beam-rpc.test.js && node test/beam-slash.test.js",
     "test:watch": "node --watch test/app.test.js test/server.test.js test/integration.test.js test/e2e.test.js",
     "test:app": "node test/app.test.js",
     "test:server": "node test/server.test.js",
@@ -26,21 +57,30 @@
     "test:e2e": "node test/e2e.test.js",
     "test:simple": "node test/simple.test.js",
     "test:direct": "node test/direct.test.js",
+    "test:smoke": "node scripts/local-pair-smoke.mjs",
+    "dev:pair": "bash scripts/dev-pair.sh",
+    "dev:local-dht": "node scripts/local-dht.mjs",
     "dev": "pear run -d ."
   },
   "dependencies": {
     "b4a": "^1.6.4",
+    "bare-fetch": "^3.4.0",
+    "bare-fs": "4.5.1",
     "bare-os": "^2.2.0",
     "bare-path": "^2.1.0",
-    "express": "^4.18.2",
-    "hyperbee": "^2.26.5",
-    "hypercore": "^11.20.1",
+    "corestore": "7.12.2",
+    "hyperbeam": "3.1.0",
     "hypercore-crypto": "^3.3.3",
+    "hyperdht": "6.33.2",
+    "hyperdrive": "13.3.3",
     "hyperswarm": "^4.6.1",
+    "localdrive": "2.2.1",
+    "mirror-drive": "1.14.2",
     "os": "npm:bare-node-os",
     "path": "npm:bare-node-path",
-    "random-access-file": "^4.1.2",
-    "random-access-memory": "^6.2.1"
+    "pear-bridge": "^1.2.5",
+    "pear-electron": "^1.7.28",
+    "random-access-file": "^4.1.2"
   },
   "devDependencies": {
     "@testing-library/dom": "^10.4.0",
@@ -50,5 +90,9 @@
     "node-fetch": "^3.3.2",
     "pear-interface": "^1.0.0",
     "supertest": "^6.3.3"
+  },
+  "overrides": {
+    "qs": "6.16.0",
+    "bogon": "1.3.0"
   }
 }
