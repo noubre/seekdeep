@@ -41,10 +41,12 @@ function createRenderer(options = {}) {
   let thinking = false;
   let frame = 0;
   let timer = null;
-  let partial = '';       // raw text of the in-progress answer line
-  let partialRows = 0;    // terminal rows it occupies
-  let needsPrefix = true; // next visible answer text needs the "ai ❯ " prefix
-  let lineOpen = false;   // something is written on the current row, unterminated
+  let partial = '';           // raw text of the in-progress answer line
+  let partialRows = 0;        // terminal rows it occupies
+  let partialWritten = false; // was the partial actually written to the screen?
+  let prefixPending = true;   // the "ai ❯ " prefix has not been emitted yet
+  let prefixShown = false;    // the prefix is currently on screen (on the partial row)
+  let lineOpen = false;       // something is written on the current row, unterminated
   const prefix = `${theme.pearBold('ai')}${theme.gray(' \u276f ')}`;
 
   function out(text) {
@@ -60,11 +62,16 @@ function createRenderer(options = {}) {
 
   function drawThinking() {
     out('\r\x1b[K' + theme.dim('thinking ' + SPINNER[frame % SPINNER.length]));
+    prefixShown = false;
     lineOpen = true;
   }
 
   function showThinking() {
-    if (needsPrefix) writePrefix();
+    if (prefixPending) {
+      out(prefix);
+      prefixPending = false;
+      prefixShown = true;
+    }
     if (!animate) {
       out('thinking\u2026');
       lineOpen = true;
@@ -79,39 +86,54 @@ function createRenderer(options = {}) {
     if (typeof timer.unref === 'function') timer.unref();
   }
 
-  // Leave the indicator line (terminating it when non-animated) so the answer
-  // can resume from a fresh prefix without smearing.
   function clearThinking() {
     stopTimer();
     if (animate) out('\r\x1b[K');
     else out('\n');
+    prefixShown = false;
     lineOpen = false;
   }
 
-  function writePrefix() {
-    out(prefix);
-    needsPrefix = false;
-    lineOpen = true;
+  // Stream the in-progress line (interactive only), emitting the prefix lazily.
+  function writePartial(text) {
+    if (interactive) {
+      if (prefixPending) {
+        out(prefix);
+        prefixPending = false;
+        prefixShown = true;
+      }
+      out(text);
+      partial += text;
+      const base = prefixShown ? 4 : 0; // 4 = visible width of "ai ❯ "
+      partialRows = Math.max(1, Math.ceil((base + partial.length) / columns));
+      partialWritten = true;
+      lineOpen = true;
+    } else {
+      partial += text; // hold back until the line completes
+    }
   }
 
-  /** Erase the in-progress line from the screen (interactive only) and reset line state. */
-  function erasePartial() {
-    if (!partial) return;
-    if (interactive) {
-      let seq = '';
-      if (partialRows > 1) seq += `\x1b[${partialRows - 1}A`;
-      seq += '\r\x1b[J';
-      out(seq);
+  // Render one completed answer line: erase any streamed partial, then write the
+  // markdown-rendered line. The prefix is written at most once per message and
+  // is restored only on the line that carried it.
+  function finishLine(text) {
+    if (interactive && partialWritten) {
+      const up = partialRows > 1 ? `\x1b[${partialRows - 1}A` : '';
+      out(`${up}\r\x1b[J`);
     }
+    const restorePrefix = prefixShown;
     partial = '';
     partialRows = 0;
-    needsPrefix = true;
-    lineOpen = false;
-  }
+    partialWritten = false;
+    prefixShown = false;
 
-  /** Write one completed (already-sanitised, marker-free) answer line, markdown-rendered. */
-  function emitLine(text) {
-    out(markdown.writeLine(text) + '\n');
+    const rendered = markdown.writeLine(text);
+    if (prefixPending && rendered === '') return; // drop leading blank lines
+    if (restorePrefix || prefixPending) {
+      out(prefix);
+      prefixPending = false;
+    }
+    out(rendered + '\n');
     lineOpen = false;
   }
 
@@ -156,7 +178,9 @@ function createRenderer(options = {}) {
     thinking = false;
     partial = '';
     partialRows = 0;
-    needsPrefix = true;
+    partialWritten = false;
+    prefixPending = true;
+    prefixShown = false;
     lineOpen = false;
     markdown.reset();
   }
@@ -174,7 +198,7 @@ function createRenderer(options = {}) {
     if (thinking) {
       clearThinking();
       thinking = false;
-      needsPrefix = true;
+      prefixPending = true; // the answer gets its own prefix after the indicator
     }
     if (answer.length <= shown) return;
     let delta = answer.slice(shown);
@@ -182,22 +206,10 @@ function createRenderer(options = {}) {
 
     let nl;
     while ((nl = delta.indexOf('\n')) !== -1) {
-      const line = partial + delta.slice(0, nl);
+      finishLine(partial + delta.slice(0, nl));
       delta = delta.slice(nl + 1);
-      erasePartial();
-      if (needsPrefix) writePrefix();
-      emitLine(line);
     }
-    if (!delta) return;
-    if (interactive) {
-      if (needsPrefix) writePrefix();
-      out(delta);
-      partial += delta;
-      partialRows = Math.max(1, Math.ceil((4 + partial.length) / columns)); // 4 = visible width of "ai ❯ "
-      lineOpen = true;
-    } else {
-      partial += delta; // hold back until the line completes
-    }
+    if (delta) writePartial(delta);
   }
 
   function assistantEnd() {
@@ -205,12 +217,7 @@ function createRenderer(options = {}) {
     streaming = false;
     stopTimer();
     thinking = false;
-    if (partial) {
-      const line = partial;
-      erasePartial();
-      if (needsPrefix) writePrefix();
-      emitLine(line);
-    }
+    if (partial) finishLine(partial);
     if (lineOpen) out('\n');
   }
 

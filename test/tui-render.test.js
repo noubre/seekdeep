@@ -186,3 +186,40 @@ test('markdown markers are resolved, not printed', function (t) {
   t.ok(text.includes('ai \u276f Hi\n'));
   t.not(text.includes('#'));
 });
+
+test('interactive streaming emits the prefix exactly once across lines', function (t) {
+  const { renderer, output } = plain({ interactive: true, columns: 80 });
+  renderer.assistantStart();
+  for (const c of ['line one\n', 'line two\n', 'line three']) renderer.assistantChunk(c);
+  renderer.assistantEnd();
+  const text = output().replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
+  t.is(text.split('ai \u276f ').length - 1, 1);
+  t.ok(text.includes('ai \u276f line one\n'));
+  t.ok(text.includes('line two\n'));
+});
+
+test('non-interactive keeps one prefix when lines split across chunks', function (t) {
+  const { renderer, output } = plain({ interactive: false });
+  renderer.assistantStart();
+  for (const c of ['para', 'graph\n', 'second\n']) renderer.assistantChunk(c);
+  renderer.assistantEnd();
+  t.is(output(), 'ai \u276f paragraph\nsecond\n');
+});
+
+test('a leading blank line does not emit a bare prefix', function (t) {
+  const { renderer, output } = plain({ interactive: false });
+  renderer.assistantStart();
+  for (const c of ['\n', 'hi\n']) renderer.assistantChunk(c);
+  renderer.assistantEnd();
+  t.is(output(), 'ai \u276f hi\n');
+});
+
+test('interactive leading blank line also emits one prefix', function (t) {
+  const { renderer, output } = plain({ interactive: true, columns: 80 });
+  renderer.assistantStart();
+  for (const c of ['\n', 'hi\n']) renderer.assistantChunk(c);
+  renderer.assistantEnd();
+  const text = output().replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
+  t.is(text.split('ai \u276f ').length - 1, 1);
+  t.ok(text.includes('ai \u276f hi\n'));
+});
