@@ -97,7 +97,9 @@ function createChatService(options = {}) {
       const peerId = b4a.toString(conn.remotePublicKey, 'hex');
       if (peers.get(peerId)?.isHost) return conn;
     }
-    return connections.values().next().value || null;
+    // No fallback on purpose: forwarding a prompt to an arbitrary peer silently loses
+    // it, and the caller's error message is more useful than a black hole.
+    return null;
   }
 
   async function resolveProvider() {
@@ -262,6 +264,9 @@ function createChatService(options = {}) {
         systemMessage(`Host changed chat mode to ${collaborative ? 'Collaborative' : 'Private'}.`);
         break;
       case 'models_update':
+        // The model list is the host's property; a peer overwriting it would make the
+        // host send prompts for models it never advertised.
+        if (role === 'host') break;
         models = message.models.map((entry) => ({ id: entry.id, name: entry.name, ...(entry.created !== undefined ? { created: entry.created } : {}) }));
         emit('models', { provider, models });
         systemMessage(`Received ${models.length} models from host.`);
@@ -278,6 +283,9 @@ function createChatService(options = {}) {
         }
         break;
       case 'response': {
+        // Only the host runs the model. A peer that sends a response frame could type
+        // arbitrary text into the host's transcript under any requestId it guesses.
+        if (role === 'host') break;
         const payload = { requestId: message.requestId, chunk: message.data, done: message.isComplete };
         if (message.error !== undefined) payload.error = message.error;
         emit('response', payload);
@@ -297,6 +305,7 @@ function createChatService(options = {}) {
         }
         break;
       case 'chat_response': {
+        if (role === 'host') break;
         const { type, requestId, kind, ...rest } = message;
         emit('chat_response', { requestId, kind, ...rest });
         break;
