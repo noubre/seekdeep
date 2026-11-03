@@ -2,3 +2,13 @@ node_modules/
 .DS_Store
 *.log
 /storage/
+# native build artifacts
+build/
+core/.build/
+core/.swiftpm/
+app/SeekDeep.xcodeproj/
+app/app.bundle
+app/addons/
+app/frameworks/
+.hermes/plans/*.html
+

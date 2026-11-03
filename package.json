@@ -55,7 +55,13 @@
     "test:smoke": "node scripts/local-pair-smoke.mjs",
     "dev:pair": "bash scripts/dev-pair.sh",
     "dev:local-dht": "node scripts/local-dht.mjs",
-    "dev": "pear run -d ."
+    "dev": "pear run -d .",
+    "native:core": "cd core && swift test",
+    "native:pack": "bare-pack --preset darwin --linked --base . --out app/app.bundle worklet/backend.js",
+    "native:link": "bare-link --preset darwin --out app/addons .",
+    "native:app": "xcodegen generate && xcodebuild -scheme SeekDeep -derivedDataPath build build",
+    "native:run": "open build/Build/Products/Debug/SeekDeep.app",
+    "native:dev": "node worklet/dev.js --stdio"
   },
   "dependencies": {
     "b4a": "^1.6.4",
@@ -79,6 +85,8 @@
   },
   "devDependencies": {
     "@testing-library/dom": "^10.4.0",
+    "bare-link": "^3.2.2",
+    "bare-pack": "^2.1.0",
     "brittle": "^3.0.0",
     "buffer": "^6.0.3",
     "jsdom": "^22.1.0",
