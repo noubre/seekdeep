@@ -3536,39 +3536,38 @@ Interop dropped, so the acceptance work is: soak, docs, and the two-native-peers
 - Still open: two native instances in one room (collaborative), which needs either UI
   automation or a `--topic` join flag on the dev worklet.
 
-### Open defect: collaborative mode reverts with a live peer
+### Defect (fixed): a joining peer silently flipped the host back to private
 
-**Found by `npm run native:two-peer`** (`scripts/two-peer-worklet.mjs`), which is the two-
-native-peer case Phase 6 asked for. Reproducer, all in one process pair on a loopback DHT:
+Found by `npm run native:two-peer`. Root cause, pinned with a temporary
+`true -> false` assignment tracer in `js/p2p/chat-service.js`:
 
 ```
-topic=217b69d2…d32616
-host: collaborative mode on
-peer: joined
-host: sees 1 peer(s), role=host
-send attempt 1: host peerCount=1, collaborative=true
-[dbg] send: role=host collab=false status.collab=false conns=1   ← after chat.setMode returned true
-peer: never saw the prompt
+[dbg] collab true->false via mode_update frame
+    at handleData (chat-service.js:261)
+    at NoiseSecretStream.<anonymous> (chat-service.js:319)
 ```
 
-Evidence, gathered with temporary instrumentation in `js/p2p/chat-service.js` (since
-reverted, `git diff js/` is clean):
+A peer sends `{type:'mode_update', isCollaborativeMode: <its own>, isHost:false}` in its
+handshake and in reply to ours. The host applied every `mode_update` it received, so a peer
+joining an already-collaborative room reverted the host's flag to `false`. The host then
+still reported `collaborative: true` (its own setMode reply and its last broadcast) while
+`chat.send` took the private branch — no broadcast, no error, prompt silently dropped.
 
-- `chat.setMode({collaborative:true})` runs and replies `{collaborative:true}`.
-- By the time `send()` executes, the same closure variable reads `false`, while
-  `connections.size === 1` — so the room *is* connected.
-- A **solo** host (no peer connected) keeps `collaborative === true` from `setMode` through
-  `send`, so the revert requires a live peer connection.
-- Consequence: in a collaborative room the host's prompt is never broadcast, the peer sees
-  nothing, and no error is raised anywhere — a silent drop, not a crash.
+Fix: a `mode_update` only applies when it comes from the host and this side is not the
+host:
 
-Not diagnosed: which path sets the flag back to `false`. Candidates in
-`js/p2p/chat-service.js`: a `mode_update` frame arriving from the peer (the handler assigns
-`collaborative = message.isCollaborativeMode === true` unconditionally), or `clearLifecycle()`
-being triggered by a re-create while the peer connects.
+```js
+if (message.isHost !== true || role === 'host') break
+```
 
-This is pre-existing JavaScript behaviour, not something the SwiftUI port introduced: the
-Swift client only calls `chat.setMode` and `chat.send`, exactly as `js/ui/**` does.
+Regression test: `js/p2p` suite, *'a peer joining cannot flip the host back to private'* —
+sets collaborative **before** the peer joins, asserts `chat.status().collaborative` stays
+true and that the peer receives the prompt. Verified it fails with the guard removed
+(`not ok 2 - host stays collaborative after a peer joins`) and passes with it (7/7).
+
+Why the existing tests missed it: `chat-service.test.js` set collaborative *after* the
+peers connected, which is the easy order. Only `scripts/two-peer-worklet.mjs` connects
+first and then sets the mode.
 
 ## Phase 7 — retire the Electron renderer (blocked on approval)
 

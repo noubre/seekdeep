@@ -252,6 +252,11 @@ function createChatService(options = {}) {
       case 'handshake_ack':
         break;
       case 'mode_update':
+        // Only the host owns the mode. A peer sends its own (initially private) state in
+        // its handshake and in reply to ours, so trusting any mode_update lets a joining
+        // peer silently flip the host back to private: the host then reports
+        // collaborative=true from a stale broadcast while send() drops every prompt.
+        if (message.isHost !== true || role === 'host') break;
         collaborative = message.isCollaborativeMode === true;
         emit('mode', { collaborative });
         systemMessage(`Host changed chat mode to ${collaborative ? 'Collaborative' : 'Private'}.`);

@@ -100,6 +100,41 @@ test('two chat services discover each other, sync mode/models, and stream a resp
   t.is(peerProviders.asks.length, 0, 'peer never calls its own provider');
 });
 
+test('a peer joining cannot flip the host back to private', async function (t) {
+  // Regression: the host set collaborative *before* the peer arrived. The peer sends its
+  // own (private) mode in its handshake, and applying that frame as if it were the host's
+  // silently reverted the host — every later prompt was broadcast to nobody.
+  const dht = await startLocalDht();
+  const host = createChatService({ providers: stubProviders(['x']), bootstrap: dht.bootstrap, now: () => 11 });
+  const peer = createChatService({ providers: stubProviders(), bootstrap: dht.bootstrap, now: () => 12 });
+  t.teardown(async () => {
+    await host.close();
+    await peer.close();
+    await dht.stop();
+  });
+
+  const hostEvents = collect(host);
+  const peerEvents = collect(peer);
+
+  const { topic } = await host.methods['chat.create']({});
+  t.alike(host.methods['chat.setMode']({ collaborative: true }), { collaborative: true });
+
+  await peer.methods['chat.join']({ topic });
+  await waitFor(() => hostEvents.of('peers').some((event) => event.peers.length === 1), 'host sees peer');
+  await waitFor(() => peerEvents.of('mode').some((event) => event.collaborative === true), 'peer learns the mode');
+
+  // Give any stray mode_update from the peer time to arrive and (wrongly) apply.
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  t.is(host.methods['chat.status']().collaborative, true, 'host stays collaborative after a peer joins');
+
+  const sent = host.methods['chat.send']({ prompt: 'shared', model: 'stub:1' });
+  await waitFor(
+    () => peerEvents.of('message').some((event) => event.message.content === 'shared'),
+    'peer receives the prompt in collaborative mode'
+  );
+  t.ok(sent.requestId);
+});
+
 test('a non-host chat.send forwards to the host and returns a requestId', async function (t) {
   const dht = await startLocalDht();
   const hostProviders = stubProviders(['only']);
