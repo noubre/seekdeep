@@ -15,7 +15,8 @@ document in the same commit as the code.
 | 1. The worklet | 1.1–1.4 | **done**, with the deviations noted at each task |
 | 2. `SeekDeepCore` | 2.1–2.10 | **done** (`e228ae3`…`855b316`) — 66 swift tests, 0 failures |
 | 3. SwiftUI shell + chat MVP | 3.1–3.5 | **done** (`e77b56d`) — window, room, streamed answer |
-| 4. Fidelity | — | next |
+| 4. Fidelity | 4.1, 4.2, 4.3, 4.5, 4.6 | **done** (`10cb0a3`, `540232e`) |
+| 4. Fidelity | 4.4 export | done (`10cb0a3`) — ⌘⇧E |
 | 5–7 | — | not started |
 
 Deviations from the code below that actually shipped are called out inline as
