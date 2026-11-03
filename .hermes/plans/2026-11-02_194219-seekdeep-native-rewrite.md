@@ -3536,6 +3536,40 @@ Interop dropped, so the acceptance work is: soak, docs, and the two-native-peers
 - Still open: two native instances in one room (collaborative), which needs either UI
   automation or a `--topic` join flag on the dev worklet.
 
+### Open defect: collaborative mode reverts with a live peer
+
+**Found by `npm run native:two-peer`** (`scripts/two-peer-worklet.mjs`), which is the two-
+native-peer case Phase 6 asked for. Reproducer, all in one process pair on a loopback DHT:
+
+```
+topic=217b69d2…d32616
+host: collaborative mode on
+peer: joined
+host: sees 1 peer(s), role=host
+send attempt 1: host peerCount=1, collaborative=true
+[dbg] send: role=host collab=false status.collab=false conns=1   ← after chat.setMode returned true
+peer: never saw the prompt
+```
+
+Evidence, gathered with temporary instrumentation in `js/p2p/chat-service.js` (since
+reverted, `git diff js/` is clean):
+
+- `chat.setMode({collaborative:true})` runs and replies `{collaborative:true}`.
+- By the time `send()` executes, the same closure variable reads `false`, while
+  `connections.size === 1` — so the room *is* connected.
+- A **solo** host (no peer connected) keeps `collaborative === true` from `setMode` through
+  `send`, so the revert requires a live peer connection.
+- Consequence: in a collaborative room the host's prompt is never broadcast, the peer sees
+  nothing, and no error is raised anywhere — a silent drop, not a crash.
+
+Not diagnosed: which path sets the flag back to `false`. Candidates in
+`js/p2p/chat-service.js`: a `mode_update` frame arriving from the peer (the handler assigns
+`collaborative = message.isCollaborativeMode === true` unconditionally), or `clearLifecycle()`
+being triggered by a re-create while the peer connects.
+
+This is pre-existing JavaScript behaviour, not something the SwiftUI port introduced: the
+Swift client only calls `chat.setMode` and `chat.send`, exactly as `js/ui/**` does.
+
 ## Phase 7 — retire the Electron renderer (blocked on approval)
 
 Do **not** start this phase without an explicit "go" from the owner. It is listed so the
