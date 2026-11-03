@@ -21,6 +21,7 @@ const RPC_METHOD_NAMES = Object.freeze([
   'beam.create', 'beam.join', 'beam.list', 'beam.status', 'beam.send', 'beam.receive', 'beam.close',
   'chat.status', 'chat.create', 'chat.join', 'chat.leave', 'chat.peers', 'chat.send',
   'chat.setMode', 'chat.refreshModels', 'chat.setProvider', 'chat.cancel',
+  'api.start', 'api.stop', 'api.status',
   'slash.list', 'slash.dispatch'
 ]);
 

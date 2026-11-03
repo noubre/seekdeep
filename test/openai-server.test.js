@@ -1,4 +1,5 @@
 import test from 'brittle';
+import http from 'node:http';
 import { createHttpServer } from '../js/openai/http-server.js';
 
 function makeBackend({ onComplete } = {}) {
@@ -14,7 +15,7 @@ function makeBackend({ onComplete } = {}) {
 }
 
 async function start(backend = makeBackend(), apiKey = null) {
-  return createHttpServer({ backend, host: '127.0.0.1', port: 0, apiKey, log: () => {} });
+  return createHttpServer({ backend, http, host: '127.0.0.1', port: 0, apiKey, log: () => {} });
 }
 
 test('GET /models lists the backend models', async function (t) {

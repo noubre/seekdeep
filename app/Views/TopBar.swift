@@ -51,6 +51,7 @@ struct TopBar: View {
 
             historyMenu
             modelMenu
+            APIMenu(model: model)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)

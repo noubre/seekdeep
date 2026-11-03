@@ -306,6 +306,11 @@ Both `server.js` and `bridge.js` expose an OpenAI/Anthropic-compatible HTTP surf
 so any client that speaks those wire formats (Claude Code, Codex, Hermes, the OpenAI
 SDK) can use a machine's GPU inference.
 
+The desktop app can serve the same surface without dropping to the CLI: the **API**
+menu in the top bar starts it as **Server** (this Mac runs the model) or **Bridge**
+(forward to the room's host), with a port, an optional API key, and a copyable base
+URL while it runs.
+
 - `node server.js` serves the endpoints on `127.0.0.1:8080` backed directly by the
   host's local provider.
 - `node bridge.js --topic=<64-hex topic from the host>` joins the room as a peer and

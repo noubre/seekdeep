@@ -166,6 +166,27 @@ const METHOD_SPECS = Object.freeze({
   harness: (harness) => ({
     'slash.list': { invoke: () => harness.runtime.list() },
     'slash.dispatch': { required: ['text'], invoke: async (text) => ({ handled: await harness.dispatch(text) }) }
+  }),
+  api: (service) => ({
+    'api.start': {
+      optional: ['mode', 'host', 'port', 'apiKey', 'model'],
+      validators: {
+        // `defineRpcMethod` treats every listed key as a string unless overridden, so
+        // the port is coerced (and range-checked) here or an integer param is rejected.
+        port: (values, key) => {
+          if (values[key] === undefined) return undefined;
+          const port = Number(values[key]);
+          if (!Number.isInteger(port) || port < 0 || port > 65535) {
+            throw new TypeError('port must be an integer between 0 and 65535');
+          }
+          return port;
+        }
+      },
+      asParams: true,
+      invoke: (params) => service.start(params)
+    },
+    'api.stop': { asParams: true, invoke: (params) => service.stop(params) },
+    'api.status': { asParams: true, invoke: (params) => service.status(params) }
   })
 });
 
@@ -222,6 +243,15 @@ function createHarnessRpcMethods(harness) {
 }
 
 /**
+ * The API service is optional: harnesses and some tests build a backend without one.
+ * An absent service contributes no methods rather than failing the whole pipe.
+ */
+function createApiRpcMethods(api) {
+  if (!api) return {};
+  return buildMethods(METHOD_SPECS.api(api));
+}
+
+/**
  * Look up, validate, and invoke one method. Shared by the pipe server and the
  * in-process harness client so both validate identically.
  */
@@ -242,7 +272,8 @@ function createResourceRpcMethods(services) {
     ...(services.mirror ? createMirrorRpcMethods(services.mirror) : {}),
     ...(services.beam ? createBeamRpcMethods(services.beam) : {}),
     ...(services.chat ? createChatRpcMethods(services.chat) : {}),
-    ...(services.harness ? createHarnessRpcMethods(services.harness) : {})
+    ...(services.harness ? createHarnessRpcMethods(services.harness) : {}),
+    ...(services.api ? createApiRpcMethods(services.api) : {})
   });
 }
 

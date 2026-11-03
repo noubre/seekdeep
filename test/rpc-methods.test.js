@@ -31,6 +31,7 @@ function stubServices() {
     mirror: { start: async () => ({}), status: async () => ({}), stop: async () => ({}) },
     beam: { create: async () => ({}), join: async () => ({}), list: async () => [], status: async () => ({}), send: async () => ({}), receive: async () => ({}), closeBeam: async () => ({}) },
     chat: { methods: chatMethods },
+    api: { start: async () => ({}), stop: async () => ({}), status: async () => ({}) },
     harness: { dispatch: async () => true, runtime: { list: () => [] } }
   };
 }

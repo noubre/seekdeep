@@ -7,8 +7,10 @@
  * backend (host-local provider router, or the DHT bridge).
  *
  * Prompts are never logged; only `method path status`.
+ *
+ * The `http` implementation is injected — `node:http` in Node, `bare-http1` in the
+ * packed Bare worklet — because a Bare bundle does not resolve `node:` builtins.
  */
-import http from 'node:http';
 import { createToolRegistry } from './tool-registry.js';
 import { parseChatCompletionsRequest, createChatCompletionsWriter, parseCompletionsRequest, createCompletionsWriter } from './codec-openai.js';
 import { parseMessagesRequest, createMessagesWriter, countInputTokens } from './codec-anthropic.js';
@@ -21,7 +23,10 @@ function errorPayload(message, code = 'invalid_request_error') {
   return { error: { message, type: 'invalid_request_error', code } };
 }
 
-function createHttpServer({ backend, host = '127.0.0.1', port = 8080, apiKey = null, log = console.log } = {}) {
+function createHttpServer({ backend, http, host = '127.0.0.1', port = 8080, apiKey = null, log = console.log } = {}) {
+  if (!http || typeof http.createServer !== 'function') {
+    throw new TypeError('createHttpServer requires an http implementation (node:http or bare-http1)');
+  }
   if (!backend || typeof backend.complete !== 'function' || typeof backend.listModels !== 'function') {
     throw new TypeError('createHttpServer requires a backend with complete() and listModels()');
   }

@@ -11,6 +11,8 @@ final class ChatViewModel: ObservableObject {
     @Published private(set) var isBusy = false
     @Published private(set) var slashCommands: [String] = []
     @Published private(set) var isReady = false
+    /// OpenAI-compatible endpoint state; `.off` until the worker reports a listener.
+    @Published private(set) var api: APIStatus = .off
     /// Newest first, refreshed after every save and delete.
     @Published private(set) var sessions: [SessionStore.Entry] = []
 
@@ -87,6 +89,7 @@ final class ChatViewModel: ObservableObject {
                 .slash(content: "Could not create a chat room: \(error.localizedDescription)", kind: "slash-error")
             )
         }
+        await refreshAPIStatus()
     }
 
     func refreshStatus() async {
@@ -104,6 +107,31 @@ final class ChatViewModel: ObservableObject {
             collaborative: collaborative,
             provider: provider
         ))
+    }
+
+    // MARK: - OpenAI endpoint
+
+    func refreshAPIStatus() async {
+        guard let response = try? await client.request("api.status") else { return }
+        api = APIStatus(json: response) ?? .off
+    }
+
+    func startAPI(mode: String, port: Int = 8080, apiKey: String = "") async {
+        var params: [String: JSONValue] = ["mode": .str(mode), "port": .number(Double(port))]
+        let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !key.isEmpty { params["apiKey"] = .str(key) }
+        do {
+            let response = try await client.request("api.start", params)
+            api = APIStatus(json: response) ?? .off
+            banner("OpenAI API on \(api.url ?? "?")", kind: "slash-help")
+        } catch {
+            banner("Could not start the API: \(error.localizedDescription)", kind: "slash-error")
+        }
+    }
+
+    func stopAPI() async {
+        _ = try? await client.request("api.stop")
+        await refreshAPIStatus()
     }
 
     func join() async {

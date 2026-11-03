@@ -13,6 +13,7 @@
  *     [--http-port=8080] [--http-host=127.0.0.1] [--api-key=<key>]
  *     [--model=<model>] [--no-http] [--local-dht=<port>|--bootstrap=host:port]
  */
+import http from 'node:http';
 import { createChatService } from './js/p2p/chat-service.js';
 import { createHttpServer } from './js/openai/http-server.js';
 import { createP2PBackend } from './js/openai/backends.js';
@@ -54,6 +55,7 @@ try {
   if (httpArgs.http) {
     server = await createHttpServer({
       backend: createP2PBackend({ service, model: httpArgs.model }),
+      http,
       host: httpArgs.httpHost,
       port: httpArgs.httpPort,
       apiKey: httpArgs.apiKey

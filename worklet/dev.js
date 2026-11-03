@@ -6,6 +6,7 @@
  *   node worklet/dev.js --stdio --storage=/tmp/seekdeep-dev
  */
 import fs from 'node:fs/promises'
+import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import { createWorklet } from './worklet.js'
@@ -43,7 +44,7 @@ const ipc = {
   }
 }
 
-const { backend } = await createWorklet({ ipc, fs, storageRoot, argv })
+const { backend } = await createWorklet({ ipc, fs, storageRoot, argv, http })
 
 let closing = false
 async function shutdown () {

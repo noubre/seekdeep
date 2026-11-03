@@ -9,6 +9,7 @@
  * Usage: node server.js [--local-dht=<port>] [--ollama-url=…] [--lmstudio-url=…]
  *                    [--http-port=8080] [--http-host=127.0.0.1] [--api-key=<key>] [--model=<model>]
  */
+import http from 'node:http';
 import { createChatService } from './js/p2p/chat-service.js';
 import { createProviderRouter } from './js/llm/provider.js';
 import { parseBootstrapArgs } from './js/p2p/bootstrap-args.js';
@@ -48,6 +49,7 @@ try {
   if (httpArgs.http) {
     httpServer = await createHttpServer({
       backend: createHostBackend({ providers, model: httpArgs.model }),
+      http,
       host: httpArgs.httpHost,
       port: httpArgs.httpPort,
       apiKey: httpArgs.apiKey

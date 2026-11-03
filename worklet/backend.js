@@ -10,6 +10,7 @@
  * js/runtime/boot.js.
  */
 import * as bareFs from 'bare-fs'
+import http from 'bare-http1'
 import { createWorklet } from './worklet.js'
 
 const fs = bareFs.promises || (await import('bare-fs/promises'))
@@ -34,7 +35,8 @@ await createWorklet({
   fs,
   storageRoot,
   argv: Bare.argv.slice(1),
-  fetchImpl: await resolveFetch()
+  fetchImpl: await resolveFetch(),
+  http
 })
 
 // The worklet dies with the host process; createWorklet()'s `end` handler flushes

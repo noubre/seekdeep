@@ -1,4 +1,5 @@
 import test from 'brittle';
+import http from 'node:http';
 import { createChatService } from '../js/p2p/chat-service.js';
 import { createP2PBackend } from '../js/openai/backends.js';
 import { createHttpServer } from '../js/openai/http-server.js';
@@ -56,7 +57,7 @@ test('the bridge forwards a streamed chat completion through the DHT room', asyn
   peer.onEvent((event) => peerEvents.push(event));
   await waitFor(() => peerEvents.some((event) => event.type === 'peers' && event.peers.length === 1), 'peer connected');
 
-  const server = await createHttpServer({ backend: createP2PBackend({ service: peer }), host: '127.0.0.1', port: 0, log: () => {} });
+  const server = await createHttpServer({ backend: createP2PBackend({ service: peer }), http, host: '127.0.0.1', port: 0, log: () => {} });
   t.teardown(async () => {
     await server.close();
     await host.close();
@@ -101,7 +102,7 @@ test('a host-side chat failure surfaces as the format error event', async functi
   peer.onEvent((event) => peerEvents.push(event));
   await waitFor(() => peerEvents.some((event) => event.type === 'peers' && event.peers.length === 1), 'peer connected');
 
-  const server = await createHttpServer({ backend: createP2PBackend({ service: peer }), host: '127.0.0.1', port: 0, log: () => {} });
+  const server = await createHttpServer({ backend: createP2PBackend({ service: peer }), http, host: '127.0.0.1', port: 0, log: () => {} });
   t.teardown(async () => {
     await server.close();
     await host.close();

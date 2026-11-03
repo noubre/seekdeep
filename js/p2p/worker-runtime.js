@@ -4,6 +4,7 @@ import { createLocaldriveService } from './localdrive-service.js';
 import { createMirrorService } from './mirror-service.js';
 import { createBeamService } from './beam-service.js';
 import { createChatService } from './chat-service.js';
+import { createApiService } from '../openai/api-service.js';
 import { createResourceRpcMethods, createJsonRpcServer } from './rpc-server.js';
 import { createBotService } from './bot-service.js';
 import { createHarness } from '../harness/harness.js';
@@ -86,6 +87,11 @@ async function createWorkerBackend(pipe, options = {}) {
         maxPeers: options.maxChatPeers
       })
     : null);
+  // The OpenAI surface is optional: Node callers pass `node:http`, the packed Bare
+  // worklet passes `bare-http1`, and a backend built without either simply has no API.
+  const apiService = options.http
+    ? createApiService({ providers: options.providers, chatService, http: options.http })
+    : null;
   const harness = options.harness || (options.disableHarness
     ? null
     : await createHarness({
@@ -115,7 +121,7 @@ async function createWorkerBackend(pipe, options = {}) {
       }));
   const rpc = createJsonRpcServer(
     pipe,
-    createResourceRpcMethods({ drive: service, localdrive: localdriveService, mirror: mirrorService, beam: beamService, chat: chatService, harness }),
+    createResourceRpcMethods({ drive: service, localdrive: localdriveService, mirror: mirrorService, beam: beamService, chat: chatService, harness, api: apiService }),
     options.rpcOptions
   );
   if (chatService) {
@@ -138,6 +144,7 @@ async function createWorkerBackend(pipe, options = {}) {
     mirrorService,
     beamService,
     chatService,
+    apiService,
     harness,
     rpc,
     close() {
@@ -145,6 +152,9 @@ async function createWorkerBackend(pipe, options = {}) {
       closing = (async () => {
         const errors = [];
         try { await rpc.close(); } catch (error) { errors.push(error); }
+        // The API server holds the HTTP port and a backend that references the chat
+        // service, so it goes down before the service it depends on.
+        if (apiService) { try { await apiService.close(); } catch (error) { errors.push(error); } }
         if (harness) { try { await harness.close(); } catch (error) { errors.push(error); } }
         try { await mirrorService.close(); } catch (error) { errors.push(error); }
         try { await beamService.close(); } catch (error) { errors.push(error); }

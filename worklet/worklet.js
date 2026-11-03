@@ -10,7 +10,7 @@ import { createWorkerBackend } from '../js/p2p/worker-runtime.js'
 import { createProviderRouter } from '../js/llm/provider.js'
 import { parseBootstrapArgs } from '../js/p2p/bootstrap-args.js'
 
-export async function createWorklet ({ ipc, fs, storageRoot, argv = [], fetchImpl = globalThis.fetch, logger = console }) {
+export async function createWorklet ({ ipc, fs, storageRoot, argv = [], fetchImpl = globalThis.fetch, logger = console, http } = {}) {
   if (typeof storageRoot !== 'string' || !path.isAbsolute(storageRoot)) {
     throw new TypeError('createWorklet requires an absolute storageRoot')
   }
@@ -25,7 +25,8 @@ export async function createWorklet ({ ipc, fs, storageRoot, argv = [], fetchImp
     providers,
     bootstrap,
     fs,
-    harnessLogger: logger
+    harnessLogger: logger,
+    http
   })
   // When the host closes its side of the IPC the pipe ends: flush drives, stop the swarm,
   // and end our own side. Without that last step the IPC keeps the worklet alive forever
