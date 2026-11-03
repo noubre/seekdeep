@@ -53,8 +53,8 @@ public struct StoredMessage: Codable, Equatable, Sendable {
 
 /// Transcript persistence: one JSON file per session plus a registry the sidebar reads.
 ///
-/// Ports the semantics of `js/session/storage.js` (which used `localStorage`) onto the
-/// file system, with the root injected so tests never touch Application Support.
+/// The Electron renderer kept this in `localStorage`; the native app writes files, with
+/// the root injected so tests never touch Application Support.
 public actor SessionStore {
     public struct Entry: Codable, Equatable, Sendable, Identifiable {
         public var id: String
