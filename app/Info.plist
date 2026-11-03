@@ -20,7 +20,11 @@
 	<string>1</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
+	<key>NSApplicationSupportsSecureRestorableState</key>
+	<true/>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSQuitAlwaysKeepsWindows</key>
+	<false/>
 </dict>
 </plist>

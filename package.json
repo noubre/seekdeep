@@ -61,7 +61,9 @@
     "native:link": "bare-link --preset darwin --out app/addons .",
     "native:app": "xcodegen generate && xcodebuild -scheme SeekDeep -derivedDataPath build build",
     "native:run": "open build/Build/Products/Debug/SeekDeep.app",
-    "native:dev": "node worklet/dev.js --stdio"
+    "native:dev": "node worklet/dev.js --stdio",
+    "native:dev:app": "bash scripts/run-native-app.sh",
+    "native:e2e": "node scripts/e2e-worklet.mjs"
   },
   "dependencies": {
     "b4a": "^1.6.4",
