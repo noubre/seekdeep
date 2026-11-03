@@ -109,6 +109,20 @@ public actor SessionStore {
         return try? JSONDecoder().decode(StoredSession.self, from: data)
     }
 
+    /// Renames one saved session. The name is trimmed; an empty (or whitespace-only)
+    /// name is ignored and the current entry is returned unchanged. An unknown id
+    /// returns nil.
+    public func rename(id: String, name: String) throws -> Entry? {
+        guard var session = try load(id: id) else { return nil }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return Entry(id: session.id, name: session.name, createdAt: session.createdAt, messageCount: session.messages.count)
+        }
+        session.name = trimmed
+        try save(session)
+        return Entry(id: session.id, name: session.name, createdAt: session.createdAt, messageCount: session.messages.count)
+    }
+
     public func delete(id: String) throws {
         try? FileManager.default.removeItem(at: sessionURL(id))
         let remaining = try list().filter { $0.id != id }

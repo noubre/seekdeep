@@ -54,6 +54,9 @@ public struct ChatState: Equatable, Sendable {
     public var thinking: String = ""
     /// Set while a saved session is open from the history menu.
     public var history: HistoryView?
+    /// Live user/assistant messages that arrived while the overlay was open. Reset when
+    /// the overlay closes, so the History bar can show `+N new`.
+    public var historyUnread: Int = 0
 
     public init() {}
 

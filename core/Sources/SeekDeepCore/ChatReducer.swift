@@ -36,6 +36,11 @@ public enum ChatReducer {
 
         case .message(let message):
             append(message, to: &state)
+            // The overlay hides the live room; count what the user cannot see. System
+            // lines are noise (peer joined, mode changed) and never count as unread.
+            if state.history != nil, message.kind == .user || message.kind == .assistant {
+                state.historyUnread += 1
+            }
 
         case .response(let requestId, let chunk, let done, let error):
             if let error, !error.isEmpty {

@@ -89,4 +89,35 @@ final class SessionStoreTests: XCTestCase {
         let entries = try await store.list()
         XCTAssertEqual(entries, [])
     }
+
+    func testRenameTrimsAndPersistsTheNewName() async throws {
+        let store = SessionStore(root: root)
+        try await store.save(session(id: "s1", name: "First", messages: 3))
+
+        let renamed = try await store.rename(id: "s1", name: "  Renamed  ")
+        XCTAssertEqual(renamed?.id, "s1")
+        XCTAssertEqual(renamed?.name, "Renamed")
+        XCTAssertEqual(renamed?.messageCount, 3)
+
+        let entries = try await store.list()
+        XCTAssertEqual(entries.map(\.name), ["Renamed"], "the registry carries the new name")
+        let loaded = try await store.load(id: "s1")
+        XCTAssertEqual(loaded?.name, "Renamed", "the session file carries the new name")
+    }
+
+    func testRenameIgnoresAnEmptyName() async throws {
+        let store = SessionStore(root: root)
+        try await store.save(session(id: "s1", name: "First"))
+
+        let renamed = try await store.rename(id: "s1", name: "   ")
+        XCTAssertEqual(renamed?.name, "First", "whitespace-only names leave the session alone")
+        let entries = try await store.list()
+        XCTAssertEqual(entries.map(\.name), ["First"])
+    }
+
+    func testRenameOfAnUnknownIdReturnsNil() async throws {
+        let store = SessionStore(root: root)
+        let renamed = try await store.rename(id: "missing", name: "Whatever")
+        XCTAssertNil(renamed)
+    }
 }

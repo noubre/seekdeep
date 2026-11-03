@@ -152,4 +152,27 @@ final class ChatReducerTests: XCTestCase {
         state.history = nil
         XCTAssertEqual(state.displayMessages.map(\.id), ["live-1"], "closing history returns to the room")
     }
+
+    func testLiveMessageWhileHistoryIsOpenCountsAsUnread() {
+        var state = ChatState()
+        state = ChatReducer.reduce(state, .message(ChatMessage(id: "live-1", kind: .user, content: "hi")))
+        state.history = HistoryView(
+            id: "old-session",
+            name: "old-session",
+            messages: [ChatMessage(id: "h-1", kind: .user, content: "past")]
+        )
+
+        state = ChatReducer.reduce(state, .message(ChatMessage(id: "live-2", kind: .assistant, content: "new")))
+        XCTAssertEqual(state.history?.messages.map(\.id), ["h-1"], "the overlay is unchanged")
+        XCTAssertEqual(state.messages.map(\.id), ["live-1", "live-2"], "the live room keeps the message")
+        XCTAssertEqual(state.historyUnread, 1)
+
+        state = ChatReducer.reduce(state, .message(ChatMessage(id: "live-3", kind: .system, content: "Peer joined")))
+        XCTAssertEqual(state.historyUnread, 1, "system lines never count as unread")
+
+        state.history = nil
+        state.historyUnread = 0
+        XCTAssertEqual(state.displayMessages.map(\.id), ["live-1", "live-2", "live-3"], "closing history returns to the live room")
+        XCTAssertEqual(state.historyUnread, 0)
+    }
 }

@@ -366,6 +366,25 @@ final class ChatViewModel: ObservableObject {
 
     func closeHistory() {
         state.history = nil
+        state.historyUnread = 0
+    }
+
+    /// Renames a saved session and refreshes the menu. The open overlay follows the new
+    /// name so the bar does not keep the old title.
+    func renameSession(_ entry: SessionStore.Entry, to name: String) async {
+        do {
+            guard let updated = try await store.rename(id: entry.id, name: name) else {
+                banner("That session could not be renamed.", kind: "slash-error")
+                return
+            }
+            if state.history?.id == updated.id {
+                state.history?.name = updated.name
+            }
+            await reloadSessions()
+            banner("Renamed to \(updated.name).", kind: "slash-help")
+        } catch {
+            report(error)
+        }
     }
 
     func deleteSession(_ entry: SessionStore.Entry) async {

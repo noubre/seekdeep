@@ -3,6 +3,9 @@ import SwiftUI
 
 struct TopBar: View {
     @ObservedObject var model: ChatViewModel
+    /// The session being renamed, plus the draft name the sheet edits.
+    @State private var renameTarget: SessionStore.Entry?
+    @State private var renameName: String = ""
 
     private var topicLabel: String {
         guard let topic = model.state.topic else { return "no room" }
@@ -56,6 +59,16 @@ struct TopBar: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(Theme.chrome)
+        .sheet(item: $renameTarget) { entry in
+            RenameSessionSheet(
+                name: $renameName,
+                onSave: {
+                    renameTarget = nil
+                    Task { await model.renameSession(entry, to: renameName) }
+                },
+                onCancel: { renameTarget = nil }
+            )
+        }
     }
 
     private var roomSummary: String {
@@ -76,6 +89,13 @@ struct TopBar: View {
                         Task { await model.openSession(entry) }
                     } label: {
                         Text("\(entry.name.isEmpty ? entry.id.prefix(8) : entry.name.prefix(40)) · \(entry.messageCount)")
+                    }
+                }
+                Divider()
+                ForEach(model.sessions) { entry in
+                    Button("Rename…") {
+                        renameName = entry.name
+                        renameTarget = entry
                     }
                 }
                 Divider()
@@ -127,5 +147,31 @@ struct TopBar: View {
         }
         .menuStyle(.borderlessButton)
         .frame(maxWidth: 180)
+    }
+}
+
+/// The one sheet TopBar presents: a name field prefilled with the session's current name.
+private struct RenameSessionSheet: View {
+    @Binding var name: String
+    let onSave: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Rename session")
+                .font(.system(size: 13, weight: .semibold))
+            TextField("Name", text: $name)
+                .textFieldStyle(.roundedBorder)
+                .frame(minWidth: 280)
+            HStack {
+                Spacer()
+                Button("Cancel", action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Button("Save", action: onSave)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(16)
     }
 }

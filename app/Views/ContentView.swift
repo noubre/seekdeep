@@ -11,7 +11,12 @@ struct ContentView: View {
             Divider().overlay(Color.black.opacity(0.4))
 
             if let history = model.state.history {
-                HistoryBar(name: history.name, count: history.messages.count, close: model.closeHistory)
+                HistoryBar(
+                    name: history.name,
+                    count: history.messages.count,
+                    unread: model.state.historyUnread,
+                    close: model.closeHistory
+                )
             }
 
             if model.state.displayMessages.isEmpty {

@@ -29,6 +29,23 @@ function createChatService(options = {}) {
   const bootstrap = Array.isArray(options.bootstrap) && options.bootstrap.length > 0 ? options.bootstrap : undefined;
   const now = typeof options.now === 'function' ? options.now : Date.now;
   const maxPeers = Number.isSafeInteger(options.maxPeers) && options.maxPeers > 0 ? options.maxPeers : MAX_PEERS;
+  // Host-loss rejoin: without a re-announce, a dropped DHT connection is indistinguishable
+  // from a quiet room. Injected schedule/cancelSchedule keep the loop testable.
+  const reconnectIntervalMs = Number.isSafeInteger(options.reconnectIntervalMs) && options.reconnectIntervalMs > 0
+    ? options.reconnectIntervalMs
+    : 2000;
+  const maxReconnectAttempts = Number.isSafeInteger(options.maxReconnectAttempts) && options.maxReconnectAttempts > 0
+    ? options.maxReconnectAttempts
+    : 15;
+  const schedule = typeof options.schedule === 'function' ? options.schedule : setTimeout;
+  const cancelSchedule = typeof options.cancelSchedule === 'function' ? options.cancelSchedule : clearTimeout;
+  // Per-peer prompt budget: one peer must not be able to pin the host GPU.
+  const maxPeerPrompts = Number.isSafeInteger(options.maxPeerPrompts) && options.maxPeerPrompts > 0
+    ? options.maxPeerPrompts
+    : 5;
+  const peerPromptWindowMs = Number.isSafeInteger(options.peerPromptWindowMs) && options.peerPromptWindowMs > 0
+    ? options.peerPromptWindowMs
+    : 60000;
 
   const swarm = swarmFactory(bootstrap ? { bootstrap } : undefined);
   if (!swarm || typeof swarm.on !== 'function') throw new TypeError('swarmFactory must return a Hyperswarm-like instance');
@@ -53,6 +70,13 @@ function createChatService(options = {}) {
   const cancelled = new Set();
   // Requests the service started and has not settled — cancel refuses unknown ids.
   const activeRequests = new Set();
+  // Host-loss rejoin. `reconnecting` is true only between a lost host handshake and the
+  // next one, so a first-time host handshake never logs "Reconnected".
+  let reconnectTimer = null;
+  let reconnectAttempts = 0;
+  let reconnecting = false;
+  // peerId -> request timestamps inside the budget window, pruned on every check.
+  const peerPrompts = new Map();
 
   function nextId() {
     messageCounter += 1;
@@ -243,12 +267,45 @@ function createChatService(options = {}) {
     sendTo(conn, { type: 'handshake_ack', serverId: publicKey });
     sendTo(conn, { type: 'mode_update', isCollaborativeMode: collaborative, isHost: role === 'host' });
     if (role === 'host') void pushModels(conn);
+    if (role === 'peer' && message.isHost === true && reconnecting) {
+      // The host is back: stop re-announcing before the next timer tick fires.
+      stopReconnect();
+      emit('host', { connected: true });
+      systemMessage('Reconnected to the host.');
+    }
     emitPeers();
     emitStatus();
     systemMessage(`Peer ${peerId.slice(0, 8)}... identified as ${displayName}`);
   }
 
+  // Budget check runs before the model: prune expired stamps, then admit or refuse.
+  function allowPeerPrompt(peerId) {
+    const nowMs = now();
+    const live = (peerPrompts.get(peerId) || []).filter((stamp) => nowMs - stamp < peerPromptWindowMs);
+    if (live.length >= maxPeerPrompts) {
+      peerPrompts.set(peerId, live);
+      return false;
+    }
+    live.push(nowMs);
+    peerPrompts.set(peerId, live);
+    return true;
+  }
+
   function handleHostQuery(peerId, message, conn) {
+    if (!allowPeerPrompt(peerId)) {
+      systemMessage(`Peer ${peerId.slice(0, 8)} is sending requests too quickly.`);
+      sendTo(conn, {
+        type: 'response',
+        requestId: message.requestId,
+        data: '',
+        isComplete: true,
+        isJson: false,
+        isPrivate: true,
+        error: 'Rate limited by host. Try again shortly.',
+        fromPeerId: publicKey
+      });
+      return;
+    }
     if (collaborative) {
       const fromPeer = peers.get(peerId)?.displayName || `Peer${peerId.slice(0, 6)}`;
       emit('message', { message: { id: nextId(), type: 'user', content: message.prompt, fromPeer, requestId: message.requestId, timestamp: now() } });
@@ -344,11 +401,15 @@ function createChatService(options = {}) {
     conn.on('data', (data) => handleData(conn, peerId, data));
     conn.on('error', () => { /* stream errors surface as close */ });
     conn.on('close', () => {
+      // Capture before the delete: after it the peer entry is gone and the host role
+      // of the connection that just died is unrecoverable.
+      const wasHost = peers.get(peerId)?.isHost === true;
       connections.delete(conn);
       peers.delete(peerId);
       emitStatus();
       emitPeers();
       systemMessage(`Peer disconnected: ${peerId.slice(0, 8)}...`);
+      if (role === 'peer' && wasHost) startReconnect();
     });
 
     sendTo(conn, { type: 'handshake', clientId: publicKey, displayName: role === 'host' ? 'Host' : 'You', timestamp: now(), isHost: role === 'host' });
@@ -358,7 +419,70 @@ function createChatService(options = {}) {
   }
   swarm.on('connection', handleConnection);
 
+  // --- host-loss detection and auto-rejoin (peer role only) ---
+
+  function cancelReconnectTimer() {
+    if (reconnectTimer === null) return;
+    try { cancelSchedule(reconnectTimer); } catch { /* already gone */ }
+    reconnectTimer = null;
+  }
+
+  function stopReconnect() {
+    cancelReconnectTimer();
+    reconnecting = false;
+    reconnectAttempts = 0;
+  }
+
+  function startReconnect() {
+    stopReconnect();
+    reconnecting = true;
+    emit('host', { connected: false });
+    systemMessage('Host disconnected. Reconnecting...');
+    scheduleRejoin();
+  }
+
+  function scheduleRejoin() {
+    if (!reconnecting || role !== 'peer' || topic === null) return;
+    if (reconnectAttempts >= maxReconnectAttempts) {
+      stopReconnect();
+      systemMessage(`Could not reach the host after ${maxReconnectAttempts} attempts. Check the topic key and re-join the room.`);
+      return;
+    }
+    reconnectTimer = schedule(() => {
+      reconnectTimer = null;
+      if (!reconnecting || role !== 'peer' || topic === null) return;
+      reconnectAttempts += 1;
+      // The re-announce itself is async (discovery flush); the next attempt is armed
+      // only after it settles, so attempts cannot pile up.
+      Promise.resolve(rejoin()).then(scheduleRejoin, scheduleRejoin);
+    }, reconnectIntervalMs);
+    // A pending re-announce must not keep a process (or a test) alive.
+    if (reconnectTimer && typeof reconnectTimer.unref === 'function') reconnectTimer.unref();
+  }
+
+  // Same topic, same options as `join()`: destroy the stale discovery, announce again.
+  async function rejoin() {
+    if (!reconnecting || role !== 'peer' || topic === null) return;
+    const previousDiscovery = discovery;
+    if (previousDiscovery && typeof previousDiscovery.destroy === 'function') {
+      try {
+        const destroying = previousDiscovery.destroy();
+        if (destroying && typeof destroying.catch === 'function') destroying.catch(() => {});
+      } catch { /* ignore */ }
+    }
+    try {
+      const nextDiscovery = swarm.join(topic, { server: true, client: true });
+      if (!nextDiscovery) throw new Error('Hyperswarm did not create a discovery handle.');
+      discovery = nextDiscovery;
+      if (typeof nextDiscovery.flushed === 'function') {
+        try { await nextDiscovery.flushed(); } catch { /* announce may still settle */ }
+      }
+    } catch { /* the next attempt retries */ }
+  }
+
   function clearLifecycle() {
+    stopReconnect();
+    peerPrompts.clear();
     const previousTopic = topic;
     const previousDiscovery = discovery;
     const previousConnections = [...connections];
@@ -525,6 +649,7 @@ function createChatService(options = {}) {
   async function close() {
     if (closing) return closing;
     closing = (async () => {
+      stopReconnect();
       clearLifecycle();
       eventHandlers.clear();
       try {

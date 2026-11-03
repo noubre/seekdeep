@@ -6,6 +6,7 @@ import SwiftUI
 struct HistoryBar: View {
     let name: String
     let count: Int
+    let unread: Int
     let close: () -> Void
 
     var body: some View {
@@ -19,6 +20,11 @@ struct HistoryBar: View {
             Text("\(count) messages · read-only")
                 .font(.system(size: 11))
                 .foregroundStyle(Theme.secondaryText.opacity(0.65))
+            if unread > 0 {
+                Text("· +\(unread) new")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.warning)
+            }
             Spacer()
             Button("Back to room", action: close)
                 .buttonStyle(.borderless)
