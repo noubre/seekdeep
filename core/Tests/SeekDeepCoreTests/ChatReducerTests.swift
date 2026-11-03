@@ -135,4 +135,21 @@ final class ChatReducerTests: XCTestCase {
         XCTAssertEqual(state.thinking, "why")
         XCTAssertEqual(state.messages[0].rawContent, "a" + open + "why" + close + "b")
     }
+
+    func testHistoryOverlayLeavesTheLiveTranscriptUntouched() {
+        var state = ChatState()
+        state = ChatReducer.reduce(state, .message(ChatMessage(id: "live-1", kind: .user, content: "hi")))
+
+        state.history = HistoryView(
+            id: "old-session",
+            name: "old-session",
+            messages: [ChatMessage(id: "h-1", kind: .user, content: "past")]
+        )
+
+        XCTAssertEqual(state.displayMessages.map(\.id), ["h-1"], "history renders when open")
+        XCTAssertEqual(state.messages.map(\.id), ["live-1"], "the room transcript is never replaced")
+
+        state.history = nil
+        XCTAssertEqual(state.displayMessages.map(\.id), ["live-1"], "closing history returns to the room")
+    }
 }

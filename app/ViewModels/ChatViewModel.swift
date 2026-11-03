@@ -136,11 +136,17 @@ final class ChatViewModel: ObservableObject {
 
     // MARK: - sending
 
+    var isViewingHistory: Bool { state.history != nil }
+
     var canSend: Bool {
-        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isBusy
+        !isViewingHistory && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isBusy
     }
 
     func send() async {
+        guard !isViewingHistory else {
+            banner("History is read-only. Close it to keep chatting.", kind: "slash-help")
+            return
+        }
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isBusy else { return }
         draft = ""
@@ -255,6 +261,7 @@ final class ChatViewModel: ObservableObject {
     /// Sessions are keyed by room topic, so a long-running room keeps one transcript that
     /// grows, instead of a new file per launch.
     private func persist() async {
+        guard state.history == nil else { return }
         // Boot emits system lines ("joining …"); a launch that never typed anything is not
         // a transcript worth listing, and saving it would add an empty entry every run.
         guard state.messages.contains(where: { $0.kind == .user || $0.kind == .assistant }) else { return }
@@ -292,20 +299,23 @@ final class ChatViewModel: ObservableObject {
         return String(id.prefix(12))
     }
 
-    /// Read-only replay: the stored transcript replaces what is on screen, but the room,
-    /// role and model stay as they are — history is a view of the past, not a rewind.
+    /// Read-only replay: the room keeps running behind the overlay, which is why nothing
+    /// is written back to the session being viewed.
     func openSession(_ entry: SessionStore.Entry) async {
         guard let stored = try? await store.load(id: entry.id) else {
             banner("That session could not be read.", kind: "slash-error")
             return
         }
-        sessionStart[entry.id] = stored.createdAt
-        var replayed = ChatState()
-        replayed.messages = stored.messages.map(\.chatMessage)
-        replayed.topic = state.topic
-        replayed.role = state.role
-        state = replayed
-        banner("Loaded \(stored.messages.count) messages from history.", kind: "slash-help")
+        state.history = HistoryView(
+            id: entry.id,
+            name: entry.name,
+            messages: stored.messages.map(\.chatMessage)
+        )
+        banner("Viewing history — read-only.", kind: "slash-help")
+    }
+
+    func closeHistory() {
+        state.history = nil
     }
 
     func deleteSession(_ entry: SessionStore.Entry) async {

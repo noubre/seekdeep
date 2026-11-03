@@ -10,10 +10,14 @@ struct ContentView: View {
             JoinBar(model: model)
             Divider().overlay(Color.black.opacity(0.4))
 
-            if model.state.messages.isEmpty {
+            if let history = model.state.history {
+                HistoryBar(name: history.name, count: history.messages.count, close: model.closeHistory)
+            }
+
+            if model.state.displayMessages.isEmpty {
                 EmptyState(state: model.state)
             } else {
-                MessageList(messages: model.state.messages)
+                MessageList(messages: model.state.displayMessages)
             }
 
             if let banner = model.state.ephemeral {
