@@ -39,6 +39,7 @@ struct ContentView: View {
         .background(Theme.canvas)
         .preferredColorScheme(.dark)
         .frame(minWidth: 560, minHeight: 420)
+        .onOpenURL { model.handleInvite($0) }
     }
 }
 

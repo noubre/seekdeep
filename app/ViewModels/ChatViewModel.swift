@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import SeekDeepCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 @MainActor
 final class ChatViewModel: ObservableObject {
@@ -170,6 +171,27 @@ final class ChatViewModel: ObservableObject {
         }
     }
 
+    /// `seekdeep://join/<topic>` from `.onOpenURL`. A bad link is a banner, not a throw:
+    /// the URL could come from a browser, a message, or a stale file. An open room is
+    /// replaced — the same thing the Join bar already does, without a prompt.
+    func handleInvite(_ url: URL) {
+        guard let topic = InviteLink.topic(from: url) else {
+            banner("That invite link is not valid.", kind: "slash-error")
+            return
+        }
+        joinTopic = topic
+        Task { await join() }
+    }
+
+    /// The invite URL for the open room, on the pasteboard. Only offered when a topic
+    /// exists; a room that never got a topic has nothing to invite into.
+    func copyInviteLink() {
+        guard let topic = state.topic, let url = InviteLink.url(forTopic: topic) else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(url.absoluteString, forType: .string)
+        banner("Invite link copied.", kind: "slash-help")
+    }
+
     func leave() async {
         _ = try? await client.request("chat.leave")
         state = ChatState()
@@ -330,6 +352,48 @@ final class ChatViewModel: ObservableObject {
         }
     }
 
+    /// Writes the current room as `StoredSession` JSON — the same shape the session
+    /// store uses, so an exported file can be imported again or dropped into another
+    /// machine's session root.
+    func exportSessionJSON() {
+        guard !state.messages.isEmpty else {
+            banner("Nothing to export yet.", kind: "slash-help")
+            return
+        }
+        let session = currentSession()
+        let panel = NSSavePanel()
+        panel.title = "Export session as JSON"
+        panel.nameFieldStringValue = "seekdeep-\(session.id.prefix(8)).json"
+        panel.allowedContentTypes = [.json]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try SessionTransfer.encode(session).write(to: url, options: .atomic)
+            banner("Exported to \(url.lastPathComponent)", kind: "slash-help")
+        } catch {
+            report(error)
+        }
+    }
+
+    /// Reads a `StoredSession` JSON file and adds it to the sidebar. An id that is
+    /// already taken is redirected to a fresh id, so an import cannot overwrite.
+    func importSessionJSON() async {
+        let panel = NSOpenPanel()
+        panel.title = "Import session"
+        panel.allowedContentTypes = [.json]
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let data = try Data(contentsOf: url)
+            let decoded = try SessionTransfer.decode(data)
+            let stored = try await SessionTransfer.importInto(store, session: decoded)
+            await reloadSessions()
+            banner("Imported \(stored.name).", kind: "slash-help")
+        } catch {
+            report(error)
+        }
+    }
+
     func dismissBanner() {
         state.ephemeral = nil
     }
@@ -360,20 +424,25 @@ final class ChatViewModel: ObservableObject {
         // Boot emits system lines ("joining …"); a launch that never typed anything is not
         // a transcript worth listing, and saving it would add an empty entry every run.
         guard state.messages.contains(where: { $0.kind == .user || $0.kind == .assistant }) else { return }
-        let id = state.topic ?? "local"
-        if sessionStart[id] == nil { sessionStart[id] = Date() }
-        let name = sessionName(for: id)
         do {
-            try await store.save(StoredSession(
-                id: id,
-                name: name,
-                createdAt: sessionStart[id] ?? Date(),
-                messages: state.messages.map(StoredMessage.init)
-            ))
+            try await store.save(currentSession())
             await reloadSessions()
         } catch {
             AppLog.fail("session save: \(error)")
         }
+    }
+
+    /// The `StoredSession` the persistence path writes for the live room. Export reuses
+    /// this so a `.json` file always matches what the sidebar lists.
+    private func currentSession() -> StoredSession {
+        let id = state.topic ?? "local"
+        if sessionStart[id] == nil { sessionStart[id] = Date() }
+        return StoredSession(
+            id: id,
+            name: sessionName(for: id),
+            createdAt: sessionStart[id] ?? Date(),
+            messages: state.messages.map(StoredMessage.init)
+        )
     }
 
     private func reloadSessions() async {

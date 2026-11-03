@@ -16,6 +16,8 @@ A P2P-enabled desktop application that interfaces with multiple local LLM provid
 - **Markdown Rendering**: Rich formatting of LLM responses
 - **Thinking Content Display**: Visibility into the LLM's reasoning process if available
 - **Response Streaming**: Real-time display of LLM responses as they're generated
+- **Invite links**: copy `seekdeep://join/<topic>` from the room header, or open one to join
+- **Session import / export**: share a transcript as `.json` from the File menu
 - **Native shell, JavaScript core**: SwiftUI window, unchanged P2P/LLM code
 
 

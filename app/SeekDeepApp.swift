@@ -25,6 +25,13 @@ struct SeekDeepApp: App {
                 Button("Export Transcript…") { model.exportTranscript() }
                     .keyboardShortcut("e", modifiers: [.command, .shift])
                     .disabled(model.state.messages.isEmpty)
+                Button("Export Session as JSON…") { model.exportSessionJSON() }
+                    .keyboardShortcut("j", modifiers: [.command, .shift])
+                    .disabled(model.state.messages.isEmpty)
+                Button("Import Session…") {
+                    Task { await model.importSessionJSON() }
+                }
+                .keyboardShortcut("i", modifiers: [.command, .shift])
                 Divider()
                 Button("Retry Last Prompt") {
                     Task { await model.retryLastPrompt() }

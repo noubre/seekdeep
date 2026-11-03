@@ -40,6 +40,15 @@ struct JoinBar: View {
                     }
                     .buttonStyle(.borderless)
                     .help("Copy the topic key")
+
+                    Button {
+                        model.copyInviteLink()
+                    } label: {
+                        Image(systemName: "link")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Copy Invite Link")
+                    .accessibilityLabel("Copy Invite Link")
                 }
             }
         }

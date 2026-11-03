@@ -43,6 +43,10 @@ targets:
         # SwiftUI show *no* window at all (which looks exactly like a hang).
         NSQuitAlwaysKeepsWindows: false
         NSApplicationSupportsSecureRestorableState: true
+        CFBundleURLTypes:
+          - CFBundleURLName: to.seekdeep.native
+            CFBundleURLSchemes:
+              - seekdeep
     entitlements:
       path: app/SeekDeep.entitlements
       properties:
