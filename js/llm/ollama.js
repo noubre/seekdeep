@@ -140,7 +140,7 @@ function createOllama(options = {}) {
           message.tool_calls.forEach((entry, arrayIndex) => {
             const index = Number.isInteger(entry?.function?.index) ? entry.function.index : arrayIndex;
             const argumentsDelta = JSON.stringify(entry?.function?.arguments ?? {});
-            const call = accumulator.upsert({ index, id: undefined, name: entry?.function?.name, argumentsDelta });
+            const call = accumulator.upsert({ index, id: undefined, name: entry?.function?.name, argumentsDelta, complete: true });
             if (onEvent) onEvent({ type: 'tool_call', index, id: call.id, name: entry?.function?.name, argumentsDelta });
           });
         }

@@ -61,13 +61,18 @@ async function readDecodedLines(response, consumeLine, label) {
  *
  * Create-on-first-sight at `index`; `id` is last-wins with a synthesized
  * fallback; `name` is last-wins; `argumentsJson` concatenates every delta.
- * @returns {{ upsert: (delta: { index: number, id?: string, name?: string, argumentsDelta?: string }) => object, toArray: () => Array<object> }}
+ * @returns {{ upsert: (delta: { index: number, id?: string, name?: string, argumentsDelta?: string, complete?: boolean }) => object, toArray: () => Array<object> }}
  */
 function createToolCallAccumulator() {
   const calls = new Map();
   const order = [];
 
-  function upsert({ index, id, name, argumentsDelta }) {
+  /**
+   * `complete` marks a provider that sends the whole argument object per chunk (Ollama).
+   * Fragments are concatenated; complete objects replace, so the result is always one
+   * parseable JSON document.
+   */
+  function upsert({ index, id, name, argumentsDelta, complete = false }) {
     let call = calls.get(index);
     if (!call) {
       call = { index, id: id ?? nextToolCallId(), name: undefined, argumentsJson: '' };
@@ -77,7 +82,9 @@ function createToolCallAccumulator() {
       call.id = id;
     }
     if (typeof name === 'string' && name) call.name = name;
-    if (typeof argumentsDelta === 'string' && argumentsDelta) call.argumentsJson += argumentsDelta;
+    if (typeof argumentsDelta === 'string' && argumentsDelta) {
+      call.argumentsJson = complete ? argumentsDelta : call.argumentsJson + argumentsDelta;
+    }
     return call;
   }
 
