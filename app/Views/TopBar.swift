@@ -49,6 +49,7 @@ struct TopBar: View {
             .help("Refresh models")
             .disabled(!model.state.isHost)
 
+            historyMenu
             modelMenu
         }
         .padding(.horizontal, 12)
@@ -60,6 +61,37 @@ struct TopBar: View {
         let role = model.state.role == "none" ? "idle" : model.state.role
         let peers = model.state.peerCount
         return "\(topicLabel) · \(role) · \(peers) peer\(peers == 1 ? "" : "s")"
+    }
+
+    /// Replay of past transcripts, keyed by room. Host-side "clear" lives here too so the
+    /// destructive action sits next to the thing it clears.
+    private var historyMenu: some View {
+        Menu {
+            if model.sessions.isEmpty {
+                Text("no saved sessions")
+            } else {
+                ForEach(model.sessions) { entry in
+                    Button {
+                        Task { await model.openSession(entry) }
+                    } label: {
+                        Text("\(entry.name.isEmpty ? entry.id.prefix(8) : entry.name.prefix(40)) · \(entry.messageCount)")
+                    }
+                }
+                Divider()
+                ForEach(model.sessions) { entry in
+                    Button("Delete \(String(entry.id.prefix(8)))") {
+                        Task { await model.deleteSession(entry) }
+                    }
+                }
+            }
+            Divider()
+            Button("Clear this conversation") { model.clearConversation() }
+                .disabled(model.state.messages.isEmpty)
+        } label: {
+            Label("History", systemImage: "clock.arrow.circlepath")
+                .font(.system(size: 11))
+        }
+        .menuStyle(.borderlessButton)
     }
 
     private var modelMenu: some View {

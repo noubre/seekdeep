@@ -1,3 +1,4 @@
+import SeekDeepCore
 import SwiftUI
 
 @main
@@ -6,7 +7,10 @@ struct SeekDeepApp: App {
 
     init() {
         let root = (try? WorkletHost.storageRoot()) ?? FileManager.default.temporaryDirectory
-        _model = StateObject(wrappedValue: ChatViewModel(transport: WorkletHost.makeTransport(storageRoot: root)))
+        _model = StateObject(wrappedValue: ChatViewModel(
+            transport: WorkletHost.makeTransport(storageRoot: root),
+            sessionStore: SessionStore(root: root.appending(path: "sessions"))
+        ))
     }
 
     var body: some Scene {

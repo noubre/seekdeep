@@ -11,14 +11,26 @@ final class ChatViewModel: ObservableObject {
     @Published private(set) var isBusy = false
     @Published private(set) var slashCommands: [String] = []
     @Published private(set) var isReady = false
+    /// Newest first, refreshed after every save and delete.
+    @Published private(set) var sessions: [SessionStore.Entry] = []
 
     private let transport: any WorkletTransport
     private let client: RPCClient
+    private let store: SessionStore
     private var eventTask: Task<Void, Never>?
+    private var saveTask: Task<Void, Never>?
+    /// Room topic -> when the transcript started, so a reopened session keeps its date.
+    private var sessionStart: [String: Date] = [:]
 
-    init(transport: any WorkletTransport) {
+    init(transport: any WorkletTransport, sessionStore: SessionStore) {
         self.transport = transport
         self.client = RPCClient(transport: transport)
+        self.store = sessionStore
+    }
+
+    deinit {
+        saveTask?.cancel()
+        eventTask?.cancel()
     }
 
     func start() async {
@@ -34,6 +46,7 @@ final class ChatViewModel: ObservableObject {
             }
             await bootstrap()
             await loadSlashCommands()
+            await reloadSessions()
             isReady = true
             #if DEBUG
             // Smoke hook: `SEEKDEEP_AUTOSEND="say hi"` exercises composer -> worker ->
@@ -109,6 +122,7 @@ final class ChatViewModel: ObservableObject {
                 kind: .system,
                 content: "Joining \(String(topic.prefix(12)))…"
             )))
+            scheduleSave()
         } catch {
             report(error)
         }
@@ -140,6 +154,8 @@ final class ChatViewModel: ObservableObject {
             ),
             to: &state
         )
+
+        scheduleSave()
 
         isBusy = true
         defer { isBusy = false }
@@ -223,6 +239,90 @@ final class ChatViewModel: ObservableObject {
         }
     }
 
+    // MARK: - history
+
+    /// Debounced: a streaming answer arrives as dozens of events, and one file write per
+    /// token would be pointless. Cancelling the previous task is what makes it debounce.
+    private func scheduleSave() {
+        saveTask?.cancel()
+        saveTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(700))
+            guard !Task.isCancelled else { return }
+            await self?.persist()
+        }
+    }
+
+    /// Sessions are keyed by room topic, so a long-running room keeps one transcript that
+    /// grows, instead of a new file per launch.
+    private func persist() async {
+        // Boot emits system lines ("joining …"); a launch that never typed anything is not
+        // a transcript worth listing, and saving it would add an empty entry every run.
+        guard state.messages.contains(where: { $0.kind == .user || $0.kind == .assistant }) else { return }
+        let id = state.topic ?? "local"
+        if sessionStart[id] == nil { sessionStart[id] = Date() }
+        let name = sessionName(for: id)
+        do {
+            try await store.save(StoredSession(
+                id: id,
+                name: name,
+                createdAt: sessionStart[id] ?? Date(),
+                messages: state.messages.map(StoredMessage.init)
+            ))
+            await reloadSessions()
+        } catch {
+            AppLog.fail("session save: \(error)")
+        }
+    }
+
+    private func reloadSessions() async {
+        sessions = (try? await store.list()) ?? []
+        AppLog.note("history: \(sessions.count) session(s)")
+    }
+
+    /// The first prompt names the session. Checked before the stored name so a transcript
+    /// that was first saved before any prompt existed upgrades instead of keeping the
+    /// topic-prefix placeholder forever.
+    private func sessionName(for id: String) -> String {
+        if let firstUser = state.messages.first(where: { $0.kind == .user })?.content {
+            return String(firstUser.prefix(48))
+        }
+        if let existing = sessions.first(where: { $0.id == id }), !existing.name.isEmpty {
+            return existing.name
+        }
+        return String(id.prefix(12))
+    }
+
+    /// Read-only replay: the stored transcript replaces what is on screen, but the room,
+    /// role and model stay as they are — history is a view of the past, not a rewind.
+    func openSession(_ entry: SessionStore.Entry) async {
+        guard let stored = try? await store.load(id: entry.id) else {
+            banner("That session could not be read.", kind: "slash-error")
+            return
+        }
+        sessionStart[entry.id] = stored.createdAt
+        var replayed = ChatState()
+        replayed.messages = stored.messages.map(\.chatMessage)
+        replayed.topic = state.topic
+        replayed.role = state.role
+        state = replayed
+        banner("Loaded \(stored.messages.count) messages from history.", kind: "slash-help")
+    }
+
+    func deleteSession(_ entry: SessionStore.Entry) async {
+        do {
+            try await store.delete(id: entry.id)
+            await reloadSessions()
+            banner("Deleted \(String(entry.id.prefix(8))).", kind: "slash-help")
+        } catch {
+            report(error)
+        }
+    }
+
+    func clearConversation() {
+        state.messages = []
+        banner("Cleared this conversation.", kind: "slash-help")
+    }
+
     // MARK: - internals
 
     private func loadSlashCommands() async {
@@ -238,6 +338,8 @@ final class ChatViewModel: ObservableObject {
     private func handle(_ notification: RPCNotification) async {
         guard let event = WorkerEvent.decode(notification: notification) else { return }
         state = ChatReducer.reduce(state, event)
+        if case .message = event { scheduleSave() }
+        if case .response = event { scheduleSave() }
         if case .response(_, let chunk, let done, let error) = event, done {
             let answer = state.messages.last(where: { $0.kind == .assistant })
             AppLog.note("response done: chunk=\(chunk.count) chars, error=\(error ?? "none"), assistant=\(answer?.rawContent.count ?? 0) chars")
