@@ -54,16 +54,29 @@ struct Composer: View {
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .focused($focused)
 
-                Button {
-                    Task { await model.send() }
-                } label: {
-                    Image(systemName: model.isBusy ? "hourglass" : "arrow.up.circle.fill")
-                        .font(.system(size: 22))
+                if model.canCancel {
+                    Button {
+                        Task { await model.cancel() }
+                    } label: {
+                        Image(systemName: "stop.circle.fill")
+                            .font(.system(size: 22))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Theme.warning)
+                    .keyboardShortcut(".", modifiers: .command)
+                    .help("Stop generating (⌘.)")
+                } else {
+                    Button {
+                        Task { await model.send() }
+                    } label: {
+                        Image(systemName: model.isBusy ? "hourglass" : "arrow.up.circle.fill")
+                            .font(.system(size: 22))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(model.canSend ? Theme.accent : Theme.systemBubble)
+                    .disabled(!model.canSend)
+                    .keyboardShortcut(.return, modifiers: .command)
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(model.canSend ? Theme.accent : Theme.systemBubble)
-                .disabled(!model.canSend)
-                .keyboardShortcut(.return, modifiers: .command)
             }
         }
         .padding(12)

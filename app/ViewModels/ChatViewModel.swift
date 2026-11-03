@@ -142,6 +142,18 @@ final class ChatViewModel: ObservableObject {
         !isViewingHistory && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isBusy
     }
 
+    /// The bubble still streaming, if any — a send returns long before its answer does.
+    var activeRequestId: String? {
+        state.messages.last(where: { $0.kind == .assistant && !$0.isComplete })?.requestId
+    }
+
+    var canCancel: Bool { activeRequestId != nil }
+
+    func cancel() async {
+        guard let id = activeRequestId else { return }
+        _ = try? await client.request("chat.cancel", ["requestId": .str(id)])
+    }
+
     func send() async {
         guard !isViewingHistory else {
             banner("History is read-only. Close it to keep chatting.", kind: "slash-help")

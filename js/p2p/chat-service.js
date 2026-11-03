@@ -47,6 +47,12 @@ function createChatService(options = {}) {
   let provider = null;
   let models = [];
   let messageCounter = 0;
+  // Cancelled requestIds. Chunks are dropped and exactly one terminal frame is emitted,
+  // so a provider that keeps generating cannot append to a bubble the user stopped.
+  // No AbortController: Bare does not guarantee it, and a flag cannot fail.
+  const cancelled = new Set();
+  // Requests the service started and has not settled — cancel refuses unknown ids.
+  const activeRequests = new Set();
 
   function nextId() {
     messageCounter += 1;
@@ -139,9 +145,10 @@ function createChatService(options = {}) {
   }
 
   function runHostRequest(requestId, model, prompt, requesterConn) {
+    activeRequests.add(requestId);
     return resolveProvider().then((active) => providers.ask(active, model, prompt, {
       onChunk: (chunk) => {
-        if (!chunk) return;
+        if (!chunk || cancelled.has(requestId)) return;
         emit('response', { requestId, chunk, done: false });
         if (requesterConn) {
           sendTo(requesterConn, { type: 'response', requestId, data: chunk, isComplete: false, isJson: false, isPrivate: true, fromPeerId: publicKey });
@@ -152,6 +159,8 @@ function createChatService(options = {}) {
       }
     })).then(
       () => {
+        activeRequests.delete(requestId);
+        if (cancelled.delete(requestId)) return; // the terminal frame was already emitted
         emit('response', { requestId, chunk: '', done: true });
         if (requesterConn) {
           sendTo(requesterConn, { type: 'response', requestId, data: '', isComplete: true, isJson: false, isPrivate: true, fromPeerId: publicKey });
@@ -161,6 +170,8 @@ function createChatService(options = {}) {
         }
       },
       (error) => {
+        activeRequests.delete(requestId);
+        if (cancelled.delete(requestId)) return;
         const message = error?.message || 'LLM request failed';
         if (requesterConn) {
           sendTo(requesterConn, { type: 'response', requestId, data: '', isComplete: true, isJson: false, isPrivate: true, fromPeerId: publicKey, error: message });
@@ -175,7 +186,9 @@ function createChatService(options = {}) {
   }
 
   function runChatRequest(requestId, message, requesterConn) {
+    activeRequests.add(requestId);
     const deliver = (frame) => {
+      if (cancelled.has(requestId)) return;
       if (requesterConn) sendTo(requesterConn, { type: 'chat_response', requestId, ...frame });
       emit('chat_response', { requestId, ...frame });
     };
@@ -204,12 +217,16 @@ function createChatService(options = {}) {
       })
       .then(
         (result) => {
+          activeRequests.delete(requestId);
+          if (cancelled.delete(requestId)) return;
           const done = { kind: 'done', finishReason: result?.finishReason || 'stop' };
           if (result?.usage?.promptTokens !== undefined) done.promptTokens = result.usage.promptTokens;
           if (result?.usage?.completionTokens !== undefined) done.completionTokens = result.usage.completionTokens;
           deliver(done);
         },
         (error) => {
+          activeRequests.delete(requestId);
+          if (cancelled.delete(requestId)) return;
           const failure = error?.message || 'Chat request failed';
           deliver({ kind: 'error', error: failure });
           systemMessage(`Error: ${failure}`, requestId);
@@ -478,6 +495,18 @@ function createChatService(options = {}) {
     return { requestId };
   }
 
+  // Stops one in-flight request. The provider keeps running in the background; its
+  // chunks are dropped, so the transcript stops where the user clicked.
+  function cancelRequest(params = {}) {
+    const requestId = params.requestId;
+    if (typeof requestId !== 'string' || !requestId) throw new Error('requestId must be a non-empty string');
+    if (!activeRequests.has(requestId) || cancelled.has(requestId)) return { cancelled: false };
+    cancelled.add(requestId);
+    systemMessage('Request cancelled.', requestId);
+    emit('response', { requestId, chunk: '', done: true });
+    return { cancelled: true };
+  }
+
   const methods = Object.freeze({
     'chat.status': () => ({ ...statusEvent(), publicKey }),
     'chat.create': (params) => create(params),
@@ -485,6 +514,7 @@ function createChatService(options = {}) {
     'chat.leave': () => leave(),
     'chat.peers': () => ({ peers: peerList() }),
     'chat.send': (params) => send(params),
+    'chat.cancel': (params) => cancelRequest(params),
     'chat.request': (params) => requestChat(params),
     'chat.setMode': (params) => setMode(params),
     'chat.refreshModels': () => refreshModels(),

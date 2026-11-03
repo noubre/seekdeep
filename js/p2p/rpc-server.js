@@ -157,6 +157,7 @@ const METHOD_SPECS = Object.freeze({
       'chat.leave': { asParams: true, invoke: call('chat.leave') },
       'chat.peers': { asParams: true, invoke: call('chat.peers') },
       'chat.send': { required: ['prompt', 'model'], asParams: true, invoke: call('chat.send') },
+      'chat.cancel': { required: ['requestId'], asParams: true, invoke: call('chat.cancel') },
       'chat.setMode': { required: ['collaborative'], validators: { collaborative: booleanValue }, asParams: true, invoke: call('chat.setMode') },
       'chat.refreshModels': { asParams: true, invoke: call('chat.refreshModels') },
       'chat.setProvider': { required: ['provider'], asParams: true, invoke: call('chat.setProvider') }
