@@ -51,6 +51,16 @@ final class ChatViewModel: ObservableObject {
             await reloadSessions()
             isReady = true
             #if DEBUG
+            // Smoke hook: `SEEKDEEP_API="server:8080"` (or "bridge:8080") starts the OpenAI
+            // surface from the environment so the packed Bare path can be exercised without a
+            // human clicking the menu. Debug builds only.
+            if let api = ProcessInfo.processInfo.environment["SEEKDEEP_API"], !api.isEmpty {
+                let parts = api.split(separator: ":", maxSplits: 1).map(String.init)
+                let mode = parts.first ?? "server"
+                let port = parts.count > 1 ? (Int(parts[1]) ?? 8080) : 8080
+                AppLog.note("smoke: starting API mode=\(mode) port=\(port)")
+                await startAPI(mode: mode, port: port)
+            }
             // Smoke hook: `SEEKDEEP_AUTOSEND="say hi"` exercises composer -> worker ->
             // reducer without a human at the keyboard.
             if let autoSend = ProcessInfo.processInfo.environment["SEEKDEEP_AUTOSEND"], !autoSend.isEmpty {

@@ -38,6 +38,7 @@
     "test:smoke": "node scripts/local-pair-smoke.mjs",
     "dev:pair": "bash scripts/dev-pair.sh",
     "dev:local-dht": "node scripts/local-dht.mjs",
+    "dev:fake-provider": "python3 scripts/fake-ollama.py 11999",
     "native:core": "cd core && swift test",
     "native:pack": "bare-pack --preset darwin --linked --base . --out app/app.bundle worklet/backend.js",
     "native:link": "bare-link --preset darwin --out app/addons .",
