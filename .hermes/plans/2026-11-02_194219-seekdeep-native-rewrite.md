@@ -1,10 +1,22 @@
 # SeekDeep native rewrite — Swift shell over an embedded Bare core
 
-**Status:** plan / awaiting go-ahead
-**Author:** Hermes (analysis of `~/pearprojects/seekdeep` @ `5a492a2`, dirty tree)
+**Status:** in progress — branch `native`
+**Author:** Hermes (analysis of `~/pearprojects/seekdeep` @ `5a492a2`)
 **Target reader:** an implementer with zero familiarity with this repo who will follow
 steps literally. If a step is ambiguous, that is a bug in this document — fix the
 document in the same commit as the code.
+
+### Progress
+
+| Phase | Tasks | State |
+|---|---|---|
+| 0. Repo hygiene + toolchain proof | 0.1–0.4 | **done** (`e3f5478`, `10642f7`, `efcb1b4`) |
+| 0.5 BareKit embedding proof | 0.5 | **next** — needs Xcode + the framework download |
+| 1. The worklet | 1.1–1.4 | **done**, with the deviations noted at each task |
+| 2–7 | — | not started |
+
+Deviations from the code below that actually shipped are called out inline as
+**As built:** notes. Trust those over the original snippet.
 
 ---
 
@@ -526,9 +538,13 @@ Expected: `npm install` reports `added N packages` (N ≥ 2); the last line prin
 `^2.1.0`.
 
 ```bash
-cd ~/pearprojects/seekdeep && npx bare-pack --version && npx bare-link --version
+cd ~/pearprojects/seekdeep && npx bare-link --version
 ```
-Expected: two version lines (`2.x.y`, `3.x.y`), exit 0.
+Expected: a version line (`3.x.y`), exit 0.
+
+> **As built:** do **not** check `bare-pack --version`. In `bare-pack@2.2.5` the CLI
+> validates its positional entry even for `--version` and bails with
+> `MISSING_ARG: <entry>`. Prove the packer works by actually packing (Task 0.4) instead.
 
 ```bash
 cd ~/pearprojects/seekdeep && npm test 2>&1 | tail -2
@@ -834,6 +850,21 @@ cd ~/pearprojects/seekdeep && node test/worklet-pipe-adapter.test.js 2>&1 | tail
 ```
 Expected: `3 tests pass` (brittle prints `ok 1 - …` per test plus a summary; exit code 0).
 
+**As built:** the shipped `worklet/pipe-adapter.js` adds two behaviours the snippet above
+lacks, both discovered by the tests failing:
+
+1. **Inbound buffering.** `createWorkerBackend` awaits harness construction *before*
+   `createJsonRpcServer` attaches `data`, so a host that writes immediately on start hit
+   an `EventEmitter` with no listener and the request vanished. Frames are queued until a
+   listener subscribes, then flushed synchronously inside `on()`.
+2. **Sticky `end`/`close`.** `createWorklet` registers `pipe.once('end')` *after* boot; an
+   `end` that arrived during boot must still fire it. The adapter remembers the settled
+   payload and re-emits it on late subscription.
+
+Both are covered by the fourth test case (`test/worklet-pipe-adapter.test.js`), which
+asserts data emitted before any listener still arrives, and that a late `once('end')`
+still fires. Do not "simplify" the adapter back to the snippet.
+
 Commit: `feat(worklet): pipe adapter for Bare.IPC`
 
 ### Task 1.2 — Shared backend boot
@@ -934,6 +965,10 @@ Expected: `1 test pass` (or brittle's `ok 1 - worklet answers chat.status…` + 
 exit 0. If it hangs, the pipe adapter's write callback is not firing — that is what Task
 1.1's first assertion guards.
 
+**As built:** three `harness.event` plugin-loaded notifications are emitted *before* any
+client request is answered, so tests and clients must filter on `parsed.id` rather than
+taking the first frame off the pipe. The shipped test does exactly that.
+
 Commit: `feat(worklet): shared backend boot`
 
 ### Task 1.3 — Node dev entry (stdio transport)
@@ -1009,6 +1044,13 @@ printf '{"id":"1","method":"chat.status","params":{}}\n' | node worklet/dev.js -
 Expected: exactly one line starting
 `{"id":"1","ok":true,"result":{"initialized":false,"topic":null,"role":"none",…` and the
 process exits when stdin closes.
+
+**As built:** `process` is not a duplex, so `dev.js` presents stdin/stdout through a
+small `ipc` object (`write(chunk, cb)` on stdout, `data` from stdin, everything else
+forwarded to `process`). It deliberately does **not** forward stdin's `end`: `rpc-server`
+treats `end` as "never write again" and drops the reply to a request that arrived with
+EOF. The entry owns shutdown instead — one macrotask for in-flight replies,
+`backend.close()`, a stdout drain, then `exit 0`.
 
 Commit: `feat(worklet): stdio dev entry`
 
