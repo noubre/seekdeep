@@ -1,21 +1,5 @@
 {
   "name": "seekdeep",
-  "main": "index.js",
-  "pear": {
-    "name": "seekdeep",
-    "type": "desktop",
-    "links": [
-      "http://localhost:11434",
-      "http://localhost:1234/api/v0/models"
-    ],
-    "gui": {
-      "backgroundColor": "#1F2430",
-      "height": "540",
-      "width": "720"
-    },
-    "pre": "pear-electron/pre",
-    "routes": "."
-  },
   "type": "module",
   "license": "Apache-2.0",
   "private": false,
@@ -47,7 +31,6 @@
     "README.md"
   ],
   "scripts": {
-    "start": "pear run .",
     "tui": "node tui.js",
     "bridge": "node bridge.js",
     "test": "node scripts/run-tests.mjs",
@@ -55,7 +38,6 @@
     "test:smoke": "node scripts/local-pair-smoke.mjs",
     "dev:pair": "bash scripts/dev-pair.sh",
     "dev:local-dht": "node scripts/local-dht.mjs",
-    "dev": "pear run -d .",
     "native:core": "cd core && swift test",
     "native:pack": "bare-pack --preset darwin --linked --base . --out app/app.bundle worklet/backend.js",
     "native:link": "bare-link --preset darwin --out app/addons .",
@@ -66,7 +48,8 @@
     "native:e2e": "node scripts/e2e-worklet.mjs",
     "native:app:release": "xcodegen generate && xcodebuild -scheme SeekDeep -derivedDataPath build -configuration Release build",
     "native:soak": "node scripts/soak-worklet.mjs --turns 150",
-    "native:two-peer": "node scripts/two-peer-worklet.mjs"
+    "native:two-peer": "node scripts/two-peer-worklet.mjs",
+    "dev:worker": "node worklet/dev.js --stdio"
   },
   "dependencies": {
     "b4a": "^1.6.4",
@@ -85,8 +68,6 @@
     "mirror-drive": "1.14.2",
     "os": "npm:bare-node-os",
     "path": "npm:bare-node-path",
-    "pear-bridge": "^1.2.5",
-    "pear-electron": "^1.7.28",
     "random-access-file": "^4.1.2"
   },
   "devDependencies": {
@@ -97,7 +78,6 @@
     "buffer": "^6.0.3",
     "jsdom": "^22.1.0",
     "node-fetch": "^3.3.2",
-    "pear-interface": "^1.0.0",
     "supertest": "^6.3.3"
   },
   "overrides": {

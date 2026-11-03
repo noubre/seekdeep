@@ -17,7 +17,9 @@ document in the same commit as the code.
 | 3. SwiftUI shell + chat MVP | 3.1–3.5 | **done** (`e77b56d`) — window, room, streamed answer |
 | 4. Fidelity | 4.1, 4.2, 4.3, 4.5, 4.6 | **done** (`10cb0a3`, `540232e`) |
 | 4. Fidelity | 4.4 export | done (`10cb0a3`) — ⌘⇧E |
-| 5–7 | — | not started |
+| 5. Packaging | 5.1–5.4 | **done** except notarization (no local identity) |
+| 6. Parity | 6.1–6.4 | **done** — two-peer bug fixed (`028e67b`) |
+| 7. Cutover | 7.1–7.3 | **done** — renderer deleted |
 
 Deviations from the code below that actually shipped are called out inline as
 **As built:** notes. Trust those over the original snippet.
@@ -3850,3 +3852,25 @@ Errors the Swift layer must survive verbatim (all arrive as
 - `Only the host can change the provider`
 - `Not connected to a host`
 - `No LLM providers are available`
+
+### Phase 7 — as built
+
+The Electron renderer is gone: `index.html`, `index.js`, `css/`, `js/ui/` (7 modules),
+`js/main.js`, `js/chat-client.js`, `lib/marked.min.js`, and the seven tests that asserted on
+rendered HTML. `package.json` lost its `main`, its whole `pear` block, the `start`/`dev`
+scripts and the `pear-bridge`/`pear-electron`/`pear-interface` dependencies.
+
+What stayed, on purpose: `js/p2p`, `js/llm`, `js/slash`, `js/harness`, `js/messages`,
+`js/runtime`, `js/session`, `js/openai`, plus `server.js`, `bridge.js`, `tui.js` and the
+plugin tree. A static import walk from those six entries reached 59 modules and none of the
+deleted ones — that walk, not intuition, is what made the deletion list.
+
+Verification after the cut:
+
+- `npm test` → **All 40 test files passed** (47 minus the 7 renderer suites).
+- `npm run check:deps` → `OK: 337 entries, 0 malicious, 0 advisories`.
+- App rebuilds, streams (`response done … assistant=70 chars`), history grows 2 → 3.
+- `npm run native:two-peer` → `TWO_PEER_OK`.
+
+Rollback is the single commit; the renderer was never branched away, so
+`git revert <sha>` restores it exactly.

@@ -1,6 +1,6 @@
 # SeekDeep
 
-A P2P-enabled desktop application that interfaces with multiple local LLM providers (Ollama and LM Studio) using Pear Runtime, Hyperswarm, and Hypercore technologies. Built with a modern modular ES6 architecture for maintainability and extensibility.
+A P2P-enabled desktop application that interfaces with multiple local LLM providers (Ollama and LM Studio). The UI is a native SwiftUI macOS app; the networking, provider and plugin layers are JavaScript (Hyperswarm, Hypercore, Hyperdrive) running inside the app as a Bare worklet.
 
 ## Key Features
 
@@ -16,11 +16,12 @@ A P2P-enabled desktop application that interfaces with multiple local LLM provid
 - **Markdown Rendering**: Rich formatting of LLM responses
 - **Thinking Content Display**: Visibility into the LLM's reasoning process if available
 - **Response Streaming**: Real-time display of LLM responses as they're generated
-- **Cross-Platform**: Built with Pear Runtime for desktop support
+- **Native shell, JavaScript core**: SwiftUI window, unchanged P2P/LLM code
 
 
 
-![SeekDeep Screenshot](./screenshots/desktop.jpeg "SeekDeep Chat Interface")
+> The screenshots further down show the retired Electron renderer. The native UI follows the
+> same layout and palette.
 
 
 
@@ -54,11 +55,8 @@ Distribution, signing and notarization notes live in `docs/release.md`.
 
 Before running SeekDeep, make sure you have:
 
-1. **Node.js** 22.23.4 or newer and **npm** installed (October 21, 2026 security releases: 22.23.4 / 24.22.1 / 26.12.1)
-2. **Pear Runtime** installed (from [Pears.com](https://pears.com)) or just run:
-   ```bash
-   npx pear
-   ```
+1. **Node.js** 22.23.4 or newer and **npm** installed (October 21, 2026 security releases: 22.23.4 / 24.22.1 / 26.12.1) — for building and for the development worker. The shipped app does not need Node.
+2. **macOS 14+** and Xcode 16+ to build the app (`npm run native:app`).
 3. **At least one LLM provider** installed and running:
 
 ### Option A: Ollama (Recommended)
@@ -108,20 +106,19 @@ Before running SeekDeep, make sure you have:
    - Load a model
    - Start the local server (usually on port 1234)
 
-2. **Launch the app in development mode:**
+2. **Launch the app:**
    ```bash
    cd seekdeep
-   pear run --dev .
-   
-   # Or:
-   pear run --dev path/to/seekdeep
+   npm install
+   npm run native:app        # build the .app
+   npm run native:run        # or: npm run native:dev:app for the fast dev loop
    ```
 
 3. **Using the app:**
    - The app window will open and auto-detect available providers
    - Select your preferred provider from the dropdown (if multiple are available)
    - Choose a model from the model dropdown
-   - Start entering prompts in the text area and click "Seek" (or press Ctrl+Enter)
+   - Start entering prompts and press ⌘↩ to send
    - The app will automatically discover and connect to peers on the P2P network using Hyperswarm
 
 4. **Provider Features:**
@@ -241,7 +238,7 @@ Publish this machine's plugins, then follow them elsewhere:
 The key can also be supplied at launch time:
 
 ```bash
-pear run --dev . --harness-key=<64hex>
+npm run native:dev:app -- --harness-key=<64hex>
 ```
 
 Machines sharing a harness key can talk to each other as bots:
@@ -260,7 +257,7 @@ two harnesses cannot loop. The bot is opt-in.
 
 1. Launch from Pear seed:
   ```bash
-  pear run [seed]
+  npm run native:dev:app -- [seed]
 
   ```
 
@@ -449,7 +446,7 @@ seekdeep/
 │   └── messages/          # Message handling modules
 │       ├── formatting.js  # Message formatting
 │       └── history.js     # Chat history
-├── index.html             # Main UI structure and styling
+├── app/                   # SwiftUI app (views, view model, transports)
 ├── plugins/               # Built-in harness plugins (p2p-core, harness-sync, bot)
 ├── server.js              # Optional standalone server component
 ├── tui.js                 # Terminal UI entrypoint (separate from the desktop app)
