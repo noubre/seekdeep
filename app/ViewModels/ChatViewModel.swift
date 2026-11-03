@@ -15,6 +15,10 @@ final class ChatViewModel: ObservableObject {
     @Published private(set) var api: APIStatus = .off
     /// Newest first, refreshed after every save and delete.
     @Published private(set) var sessions: [SessionStore.Entry] = []
+    /// Last prompt the composer accepted, for ⌘R.
+    @Published private(set) var lastSentPrompt: String?
+    /// Up/↓ prompt history for the composer.
+    @Published private(set) var recall = PromptRecall()
 
     private let transport: any WorkletTransport
     private let client: RPCClient
@@ -200,6 +204,9 @@ final class ChatViewModel: ObservableObject {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isBusy else { return }
         draft = ""
+        // Accepted: remember it for ⌘R and the ↑/↓ history.
+        recall.record(text)
+        lastSentPrompt = text
 
         ChatReducer.append(
             ChatMessage(
@@ -227,6 +234,44 @@ final class ChatViewModel: ObservableObject {
         } catch {
             report(error)
         }
+    }
+
+    // MARK: - retry and recall
+
+    /// Arrow-key recall is a no-op while a saved transcript is open. While a stream is
+    /// running it stays a no-op as long as the draft is untouched, so a running answer
+    /// cannot silently replace what the user is typing.
+    private var recallAllowed: Bool {
+        if isViewingHistory { return false }
+        if isBusy && draft.isEmpty { return false }
+        return true
+    }
+
+    func recallOlder() {
+        guard recallAllowed, let text = recall.previous(draft: draft) else { return }
+        draft = text
+    }
+
+    func recallNewer() {
+        guard recallAllowed, let text = recall.next(draft: draft) else { return }
+        draft = text
+    }
+
+    func canRetry() -> Bool {
+        !isViewingHistory && !isBusy && lastSentPrompt != nil
+    }
+
+    func retryLastPrompt() async {
+        guard !isViewingHistory, !isBusy else {
+            banner("Close history or wait for the current answer, then retry.", kind: "slash-help")
+            return
+        }
+        guard let prompt = lastSentPrompt else {
+            banner("Nothing to retry yet.", kind: "slash-help")
+            return
+        }
+        draft = prompt
+        await send()
     }
 
     // MARK: - room controls

@@ -406,6 +406,9 @@ function createChatService(options = {}) {
       const wasHost = peers.get(peerId)?.isHost === true;
       connections.delete(conn);
       peers.delete(peerId);
+      // The per-peer budget dies with the connection; otherwise a long-lived room
+      // keeps one stamp array for every peer id ever seen.
+      peerPrompts.delete(peerId);
       emitStatus();
       emitPeers();
       systemMessage(`Peer disconnected: ${peerId.slice(0, 8)}...`);

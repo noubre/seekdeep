@@ -25,6 +25,12 @@ struct SeekDeepApp: App {
                 Button("Export Transcript…") { model.exportTranscript() }
                     .keyboardShortcut("e", modifiers: [.command, .shift])
                     .disabled(model.state.messages.isEmpty)
+                Divider()
+                Button("Retry Last Prompt") {
+                    Task { await model.retryLastPrompt() }
+                }
+                .keyboardShortcut("r", modifiers: .command)
+                .disabled(!model.canRetry())
             }
         }
     }

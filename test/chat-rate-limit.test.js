@@ -45,7 +45,11 @@ function fakeConn(hexKey) {
     on(event, handler) { listeners[event] = handler; return this; },
     off() { return this; },
     write(buffer) { written.push(parsePeerMessage(buffer, { maxMessageBytes: FRAME_LIMIT })); return true; },
-    destroy() { this.destroyed = true; },
+    destroy() {
+      this.destroyed = true;
+      // A real socket emits 'close' when it is destroyed.
+      if (typeof listeners.close === 'function') listeners.close();
+    },
     send(message) { listeners.data(b4a.from(JSON.stringify(message))); }
   };
 }
@@ -126,4 +130,54 @@ test('pruned stamps free the budget again after the window', async function (t) 
   peer.send({ type: 'query', model: 'stub:1', prompt: 'd', requestId: 'r4' });
   await settle();
   t.is(providers.asks.length, 3, 'the window sliding forward admits new prompts');
+});
+
+test('a closed peer frees its budget for a new peer and a reconnect', async function (t) {
+  const swarm = fakeSwarm();
+  const providers = stubProviders();
+  const service = createChatService({
+    providers,
+    swarmFactory: () => swarm,
+    now: () => 1,
+    maxPeerPrompts: 5,
+    peerPromptWindowMs: 60000
+  });
+  t.teardown(async () => { await service.close(); });
+
+  await service.methods['chat.create']({});
+  const flooder = fakeConn('ab'.repeat(32));
+  swarm.connect(flooder);
+  flooder.send({ type: 'handshake', clientId: 'peer', displayName: 'Peer', timestamp: 1, isHost: false });
+  for (let i = 0; i < 5; i += 1) {
+    flooder.send({ type: 'query', model: 'stub:1', prompt: `flood-${i}`, requestId: `f${i}` });
+  }
+  await settle();
+  t.is(providers.asks.length, 5, 'the flooder used its whole window');
+
+  flooder.send({ type: 'query', model: 'stub:1', prompt: 'flood-5', requestId: 'f5' });
+  await settle();
+  t.is(providers.asks.length, 5, 'still capped while the connection is alive');
+
+  flooder.destroy();
+  await settle();
+
+  const newcomer = fakeConn('cd'.repeat(32));
+  swarm.connect(newcomer);
+  newcomer.send({ type: 'handshake', clientId: 'peer', displayName: 'Newcomer', timestamp: 1, isHost: false });
+  for (let i = 0; i < 5; i += 1) {
+    newcomer.send({ type: 'query', model: 'stub:1', prompt: `new-${i}`, requestId: `n${i}` });
+  }
+  await settle();
+  t.is(providers.asks.length, 10, 'after the flooder closed, a new peer is admitted five times');
+
+  // Same peer id, new connection: the closed id must not keep its stamps, or a
+  // reconnecting peer would stay locked out for the rest of the window.
+  const reconnector = fakeConn('ab'.repeat(32));
+  swarm.connect(reconnector);
+  reconnector.send({ type: 'handshake', clientId: 'peer', displayName: 'Peer', timestamp: 1, isHost: false });
+  for (let i = 0; i < 5; i += 1) {
+    reconnector.send({ type: 'query', model: 'stub:1', prompt: `re-${i}`, requestId: `r${i}` });
+  }
+  await settle();
+  t.is(providers.asks.length, 15, 'the reconnecting peer id starts a fresh window');
 });

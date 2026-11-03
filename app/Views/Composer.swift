@@ -1,9 +1,12 @@
+import AppKit
 import SeekDeepCore
 import SwiftUI
 
 struct Composer: View {
     @ObservedObject var model: ChatViewModel
     @FocusState private var focused: Bool
+    /// Local keyDown monitor, installed only while the editor has focus.
+    @State private var keyMonitor: Any?
 
     private var suggestions: [String] {
         guard let query = SlashQuery.command(in: model.draft, caret: model.draft.count) else { return [] }
@@ -45,6 +48,21 @@ struct Composer: View {
             }
 
             HStack(alignment: .bottom, spacing: 8) {
+                if model.canRetry() {
+                    Button {
+                        Task { await model.retryLastPrompt() }
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "arrow.clockwise")
+                            Text("Retry")
+                        }
+                        .font(.system(size: 11, weight: .medium))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Theme.secondaryText)
+                    .help("Send the last prompt again (⌘R)")
+                }
+
                 TextEditor(text: $model.draft)
                     .font(.system(size: 13))
                     .scrollContentBackground(.hidden)
@@ -81,5 +99,44 @@ struct Composer: View {
         }
         .padding(12)
         .background(Color.black.opacity(0.15))
+        .onChange(of: focused) { _, isFocused in
+            if isFocused {
+                installRecallMonitor()
+            } else {
+                removeRecallMonitor()
+            }
+        }
+        .onDisappear(perform: removeRecallMonitor)
+    }
+
+    /// `.onKeyPress` does not see key events while a `TextEditor` is first responder on
+    /// macOS 14, so recall is a local `NSEvent` monitor that exists only while the
+    /// composer is focused. Up arrow is taken when the draft is empty (nothing for the
+    /// caret to run into) or while a recall browse is already active; down arrow is
+    /// taken only while browsing, so it never steals end-of-text motion in a draft.
+    private func installRecallMonitor() {
+        guard keyMonitor == nil else { return }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
+            guard modifiers.isEmpty else { return event }
+            switch event.keyCode {
+            case 126: // up arrow
+                guard model.draft.isEmpty || model.recall.index != nil else { return event }
+                model.recallOlder()
+                return nil
+            case 125: // down arrow
+                guard model.recall.index != nil else { return event }
+                model.recallNewer()
+                return nil
+            default:
+                return event
+            }
+        }
+    }
+
+    private func removeRecallMonitor() {
+        guard let monitor = keyMonitor else { return }
+        NSEvent.removeMonitor(monitor)
+        keyMonitor = nil
     }
 }
