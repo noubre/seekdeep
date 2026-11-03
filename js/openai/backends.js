@@ -40,7 +40,10 @@ function createHostBackend({ providers, model = null }) {
 
   function complete(request, sink) {
     let cancelled = false;
-    const controller = new AbortController();
+    // No AbortController on Bare. Without one we cannot abort the provider at
+    // the fetch layer; `cancelled` still stops delivery, so the stream ends
+    // where the caller stopped listening. Same tradeoff as chat-service.js.
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
 
     (async () => {
       const provider = await resolveActive();
@@ -49,7 +52,8 @@ function createHostBackend({ providers, model = null }) {
         sink.error(new Error('No local LLM provider is available'));
         return;
       }
-      const params = { messages: request.messages, tools: request.tools || [], signal: controller.signal };
+      const params = { messages: request.messages, tools: request.tools || [] };
+      if (controller) params.signal = controller.signal;
       if (request.temperature !== undefined) params.temperature = request.temperature;
       if (request.maxTokens !== undefined) params.maxTokens = request.maxTokens;
       if (request.stop !== undefined) params.stop = request.stop;
@@ -68,7 +72,7 @@ function createHostBackend({ providers, model = null }) {
 
     return () => {
       cancelled = true;
-      try { controller.abort(); } catch { /* ignore */ }
+      try { controller?.abort(); } catch { /* ignore */ }
     };
   }
 

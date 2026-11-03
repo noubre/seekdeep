@@ -1,6 +1,7 @@
 import test from 'brittle';
 import http from 'node:http';
 import { createHttpServer } from '../js/openai/http-server.js';
+import { createHostBackend } from '../js/openai/backends.js';
 
 function makeBackend({ onComplete } = {}) {
   return {
@@ -157,4 +158,46 @@ test('backend completion failures surface as the format error event', async func
   const text = await response.text();
   t.ok(text.includes('event: error'));
   t.ok(text.includes('host provider exploded'));
+});
+
+test('host backend completes when AbortController is missing (Bare worklet)', async function (t) {
+  const saved = globalThis.AbortController;
+  globalThis.AbortController = undefined;
+  t.teardown(() => { globalThis.AbortController = saved; });
+
+  let seenParams = null;
+  const providers = {
+    providers: ['stub'],
+    listModels: async () => [{ id: 'stub:1', name: 'Stub 1' }],
+    chat: async (provider, model, params, onEvent) => {
+      seenParams = params;
+      onEvent({ type: 'text', text: 'bare ok' });
+      return { finishReason: 'stop', usage: { promptTokens: 2, completionTokens: 3 } };
+    }
+  };
+  const backend = createHostBackend({ providers });
+  const server = await start(backend);
+  t.teardown(() => server.close());
+
+  // node:http, not fetch: undici's fetch constructs an AbortController itself.
+  const payload = JSON.stringify({ model: 'stub:1', messages: [{ role: 'user', content: 'hi' }], stream: false });
+  const { status, text } = await new Promise((resolve, reject) => {
+    const req = http.request(`${server.url}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    }, (res) => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => { body += chunk; });
+      res.on('end', () => resolve({ status: res.statusCode, text: body }));
+    });
+    req.on('error', reject);
+    req.end(payload);
+  });
+  t.is(status, 200);
+  const body = JSON.parse(text);
+  t.is(body.choices[0].message.content, 'bare ok');
+  t.is(body.choices[0].finish_reason, 'stop');
+  t.ok(seenParams, 'provider chat received params');
+  t.ok(!('signal' in seenParams), 'params omit signal when there is no AbortController');
 });
