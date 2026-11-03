@@ -15,6 +15,13 @@ struct SeekDeepApp: App {
                 .task { await model.start() }
         }
         .defaultSize(width: 760, height: 560)
-        .commands { CommandGroup(replacing: .newItem) {} }
+        .commands {
+            CommandGroup(replacing: .newItem) {}
+            CommandGroup(after: .saveItem) {
+                Button("Export Transcript…") { model.exportTranscript() }
+                    .keyboardShortcut("e", modifiers: [.command, .shift])
+                    .disabled(model.state.messages.isEmpty)
+            }
+        }
     }
 }

@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SeekDeepCore
 import SwiftUI
@@ -185,6 +186,31 @@ final class ChatViewModel: ObservableObject {
 
     func selectModel(_ id: String) {
         state.selectedModel = id
+    }
+
+    /// Markdown export of what is on screen, without the reasoning blocks.
+    var transcriptMarkdown: String {
+        Transcript.markdown(state.messages, topic: state.topic)
+    }
+
+    /// Writes the transcript wherever the user points the save panel. Kept on the view
+    /// model (not in the view) so the menu command and any future ⌘⇧E handler share it.
+    func exportTranscript() {
+        guard !state.messages.isEmpty else {
+            banner("Nothing to export yet.", kind: "slash-help")
+            return
+        }
+        let panel = NSSavePanel()
+        panel.title = "Export transcript"
+        panel.nameFieldStringValue = "seekdeep-\(state.topic?.prefix(8) ?? "chat").md"
+        panel.allowedContentTypes = [.plainText]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try transcriptMarkdown.write(to: url, atomically: true, encoding: .utf8)
+            banner("Exported to \(url.lastPathComponent)", kind: "slash-help")
+        } catch {
+            report(error)
+        }
     }
 
     func dismissBanner() {
