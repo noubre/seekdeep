@@ -11,9 +11,9 @@ document in the same commit as the code.
 | Phase | Tasks | State |
 |---|---|---|
 | 0. Repo hygiene + toolchain proof | 0.1–0.4 | **done** (`e3f5478`, `10642f7`, `efcb1b4`) |
-| 0.5 BareKit embedding proof | 0.5 | **next** — needs Xcode + the framework download |
+| 0.5 BareKit embedding proof | 0.5 | **done** (`ff9ce8c`) — app boots the worklet and answers RPC |
 | 1. The worklet | 1.1–1.4 | **done**, with the deviations noted at each task |
-| 2–7 | — | not started |
+| 2–7 | — | not started; Phase 3's `BareTransport` snippet is corrected below |
 
 Deviations from the code below that actually shipped are called out inline as
 **As built:** notes. Trust those over the original snippet.
@@ -705,6 +705,82 @@ prints their stderr and the build stops — read the first 20 lines of the tool 
 
 > **Stop here if Task 0.5 fails.** Report which pre-action failed and the tool output.
 > Do not work around it by copying JS files into the bundle by hand.
+
+**As built — read this before repeating the task.** Four things the steps above get
+wrong or leave out, all discovered the hard way:
+
+1. **The release asset is not laid out as the reference README says.** `prebuilds.zip`
+   contains `apple/BareKit.xcframework` (with an `ios-arm64`, an
+   `ios-arm64_x86_64-simulator` and a **universal** `macos-arm64_x86_64` slice), not a
+   `darwin/` directory. Also, `gh` is unauthenticated on this machine, so fetch with curl:
+
+   ```bash
+   curl -fsSL -o /tmp/prebuilds.zip \
+     https://github.com/holepunchto/bare-kit/releases/download/v2.1.3/prebuilds.zip
+   unzip -q /tmp/prebuilds.zip 'apple/BareKit.xcframework/*' -d /tmp/bk
+   mv /tmp/bk/apple/BareKit.xcframework app/frameworks/
+   ```
+   The extracted framework is ~350 MB and gitignored.
+
+2. **You do not need the local `BareKit.xcframework` as a linker dependency.** the
+   `bare-kit-swift` SwiftPM package already declares a `binaryTarget` that fetches its own
+   copy. Adding `- framework: app/frameworks/BareKit.xcframework` *and* the package
+   duplicates the binary; the working `project.yml` links only `- package: BareKit`. Keep
+   the local framework on disk for inspection, not on the link line.
+
+3. **bare-link emits no manifest.** Version 3.3.2 writes one `.framework` per native
+   addon into `app/addons/` and does not produce `addons.yml`. Without a manifest that
+   embeds and signs them, the worklet dies at load with
+   `AddonError: CANNOT_LOAD: Cannot load addon 'linked:…'`. Generate it from the listing
+   and `include:` it:
+
+   ```bash
+   cd ~/pearprojects/seekdeep && node -e "
+   const fs=require('node:fs');
+   const dir='app/addons';
+   const fw=fs.readdirSync(dir).filter(n=>n.endsWith('.framework')).sort();
+   fs.writeFileSync(dir+'/addons.yml',
+     ['targets:','  SeekDeep:','    dependencies:',...fw.map(n=>'      - framework: '+n)].join('\n')+'\n');
+   console.log('wrote', fw.length, 'frameworks');"
+   ```
+   Expected: `wrote 30 frameworks`. Then `project.yml` starts with:
+
+   ```yaml
+   name: SeekDeep
+   include:
+     - app/addons/addons.yml
+   ```
+
+4. **`localdrive` needs Node's `fs`.** It does `require('fs')` / `require('fs/promises')`,
+   which do not exist under Bare (`bare-fs` does). Alias it the way this repo already
+   aliases `os` and `path`, in `package.json` `dependencies`:
+
+   ```json
+   "fs": "npm:bare-node-fs@^1.0.2",
+   ```
+   Then `npm install --ignore-scripts`. Under Node the builtin still wins, so nothing else
+   changes.
+
+Two more runtime facts that will bite Phase 3 if they are forgotten:
+
+- **`Worklet` and `IPC` throw, and `start` takes a filename + arguments** — the API in
+  `bare-kit-swift` is `try Worklet()`, `try IPC(worklet:)`,
+  `try worklet.start("app.bundle", arguments: ["--storage=…"])`. The reference app's
+  `start(name:ofType:)` does not exist in this version.
+- **The worklet is not Node's** — `Bare.IPC`, `Bare.argv` and `Bare.exit` exist;
+  `globalThis.fetch` and `process` do **not**. Resolve fetch through `bare-fetch`
+  (as `js/runtime/boot.js` does) and guard anything touching `process`.
+- Exiting with a live worklet aborts the process (exit 134). The shutdown order is
+  `ipc.end()` → drop the `IPC` reference → drop the `Worklet` → `exit(0)`.
+
+Verification that actually proves embedding (do this, not just the bundle-in-Resources
+check): run the binary from a terminal, not with `open`:
+
+```bash
+cd ~/pearprojects/seekdeep && ./build/Build/Products/Debug/SeekDeep.app/Contents/MacOS/SeekDeep 2>&1 | tail -3; echo "exit=$?"
+```
+Expected: the worklet's start line, one `{"id":"1","ok":true,…"publicKey":"…"}` frame, and
+`exit=0`.
 
 Commit: `chore: prove BareKit embeds the worklet`
 
@@ -2347,7 +2423,9 @@ final class ProcessTransport: WorkletTransport, @unchecked Sendable {
 #endif
 ```
 
-`app/Services/BareTransport.swift`:
+`app/Services/BareTransport.swift` — **checked against `bare-kit-swift` on this machine**
+(`Worklet` and `IPC` throw; `start` takes a filename plus `arguments`, and the reference
+app's `start(name:ofType:)` does not exist):
 
 ```swift
 import BareKit
@@ -2355,8 +2433,8 @@ import Foundation
 
 /// Ships: the worklet runs on its own thread inside this process (bare-kit).
 final class BareTransport: WorkletTransport, @unchecked Sendable {
-    private let worklet = Worklet()
-    private let ipc: IPC
+    private var worklet: Worklet?
+    private var ipc: IPC?
     private let storageRoot: URL
     private let continuation: AsyncStream<Data>.Continuation
     let inbound: AsyncStream<Data>
@@ -2366,13 +2444,18 @@ final class BareTransport: WorkletTransport, @unchecked Sendable {
         var captured: AsyncStream<Data>.Continuation!
         inbound = AsyncStream { captured = $0 }
         continuation = captured
-        self.ipc = IPC(worklet: worklet)
     }
 
     func start() async throws {
-        // The storage root travels as a worklet argument: a Bare worklet has no
-        // Pear config, so `resolveAppStorage()` in worker-runtime.js needs it passed in.
-        worklet.start(name: "app", ofType: "bundle", args: ["--storage=\(storageRoot.path)"])
+        let worklet = try Worklet()
+        let ipc = try IPC(worklet: worklet)
+        self.worklet = worklet
+        self.ipc = ipc
+        // The storage root travels as a worklet argument: a Bare worklet has no Pear
+        // config, so `resolveAppStorage()` in worker-runtime.js needs it passed in.
+        // A relative filename resolves against the app bundle's resources.
+        try worklet.start("app.bundle", arguments: ["--storage=\(storageRoot.path)"])
+
         Task { [ipc, continuation] in
             do {
                 for try await chunk in ipc { continuation.yield(chunk) }
@@ -2382,21 +2465,21 @@ final class BareTransport: WorkletTransport, @unchecked Sendable {
         }
     }
 
-    func send(_ data: Data) async throws { try await ipc.write(data: data) }
+    func send(_ data: Data) async throws {
+        guard let ipc else { throw BareKitError.closed }
+        try await ipc.write(data)
+    }
 
+    /// Order matters: end the pipe, release the IPC, release the Worklet, and only then
+    /// let the process exit. Exiting with a live worklet aborts the process (exit 134).
     func stop() async {
         continuation.finish()
-        worklet.terminate()
+        ipc?.end()
+        ipc = nil
+        worklet = nil
     }
 }
 ```
-
-> `Worklet.start(name:ofType:args:)` — verify the exact signature against
-> `bare-kit-swift`'s source before writing app code:
-> `grep -n "public func start" .build/checkouts/bare-kit-swift/Sources/BareKit/*.swift`
-> (or read the SPM checkout in DerivedData). If there is no `args:` parameter, pass
-> the storage root through `Info.plist`'s `EnvironmentVariables` instead — but do
-> **not** hardcode a path inside the worklet.
 
 `app/Services/WorkletHost.swift` — the small factory that picks a transport:
 
