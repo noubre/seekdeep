@@ -13,7 +13,9 @@ document in the same commit as the code.
 | 0. Repo hygiene + toolchain proof | 0.1–0.4 | **done** (`e3f5478`, `10642f7`, `efcb1b4`) |
 | 0.5 BareKit embedding proof | 0.5 | **done** (`ff9ce8c`) — app boots the worklet and answers RPC |
 | 1. The worklet | 1.1–1.4 | **done**, with the deviations noted at each task |
-| 2–7 | — | not started; Phase 3's `BareTransport` snippet is corrected below |
+| 2. `SeekDeepCore` | 2.1–2.10 | **done** (`e228ae3`…`855b316`) — 66 swift tests, 0 failures |
+| 3. SwiftUI shell | 3.1 | **done** — package + test target wired, `xcodebuild test` green |
+| 3.2–7 | — | not started; the `BareTransport` snippet is corrected below |
 
 Deviations from the code below that actually shipped are called out inline as
 **As built:** notes. Trust those over the original snippet.
@@ -2470,12 +2472,17 @@ final class BareTransport: WorkletTransport, @unchecked Sendable {
         try await ipc.write(data)
     }
 
-    /// Order matters: end the pipe, release the IPC, release the Worklet, and only then
-    /// let the process exit. Exiting with a live worklet aborts the process (exit 134).
+    /// Order matters: end the pipe, close the IPC, terminate, wait for the worklet's own
+    /// teardown, then exit. `end()` alone leaves the worklet alive because BareKit keeps it
+    /// running until both IPC sides have ended, and exiting with a live worklet aborts the
+    /// process (exit 134, intermittently).
     func stop() async {
         continuation.finish()
         ipc?.end()
+        ipc?.close()
         ipc = nil
+        worklet?.terminate()
+        _ = await worklet?.wait()
         worklet = nil
     }
 }
@@ -3365,6 +3372,74 @@ EOF
 )"
 ```
 Expected: a PR URL. Do not merge without a manual run of Task 6.1's native half.
+
+---
+
+### Phase 2 — as built
+
+The package shipped with these corrections to the tasks above. Each one was a compile
+error or a test failure first, so they are not stylistic preferences:
+
+1. **`Package.swift` argument order.** `swiftLanguageModes:` must come after `targets:`,
+   or the manifest fails with `argument 'targets' must precede argument
+   'swiftLanguageModes'`.
+2. **`RPCClient.notifications` must be `nonisolated`.** It is an immutable `AsyncStream`,
+   so isolating it only forces every caller onto the actor for no benefit — and tests can
+   not iterate it at all without it.
+3. **`JSONValue.int` rejects negatives and non-integers.** It exists for counts and
+   millisecond timestamps; `-1` and `1.5` both return `nil`, so a hostile frame cannot
+   produce a negative peer count.
+4. **Request frames use `.sortedKeys`.** Without it the encoded key order is
+   hash-dependent, which makes byte-level assertions (and captured-frame debugging)
+   impossible.
+5. **Two names differ from the task text:** the file is `MarkdownBlock.swift` and the type
+   is `MarkdownBlock` (`Block` loses its `language` payload — SwiftUI colours code blocks
+   from the palette, not from the fence info string).
+6. **`ChatState.emptyReason` only reports `.noHost` when `role == "peer"`.** During the
+   first few hundred milliseconds after launch the role is `"none"`, and showing
+   "Not connected to a host" then is a lie.
+7. **`Transcript` timestamps are UTC with an explicit `UTC` suffix**, so exports are
+   unambiguous and testable.
+8. **The Xcode scheme needs `testTargets: [SeekDeepTests]`**; without it
+   `xcodebuild test` fails with "Scheme SeekDeep is not currently configured for the test
+   action".
+
+Verification actually run:
+
+```bash
+cd ~/pearprojects/seekdeep/core && swift test          # Executed 66 tests, with 0 failures
+cd ~/pearprojects/seekdeep && npm test                # 47 files
+cd ~/pearprojects/seekdeep && xcodebuild -scheme SeekDeep -destination 'platform=macOS' test
+# ** TEST SUCCEEDED **
+```
+
+### Worklet shutdown — the rule that cost the most time
+
+`ipc.end()` alone does **not** stop a worklet. BareKit keeps the worklet alive until both
+sides of the IPC have ended, so the host's `await worklet.wait()` hangs forever (and
+`exit()` while the thread is still running aborts the process, exit 134, roughly one run
+in ten). Two cooperating pieces are required:
+
+- **worklet side** (`worklet/worklet.js`): on `end`, close the backend and then end its
+  own side of the IPC:
+
+  ```js
+  pipe.once('end', () => {
+    void backend.close().catch(() => {}).then(() => { try { pipe.end() } catch {} })
+  })
+  ```
+
+- **host side**: end, close, terminate, wait, then exit:
+
+  ```swift
+  ipc?.end()
+  ipc?.close()
+  worklet?.terminate()
+  _ = await worklet?.wait()
+  exit(code)
+  ```
+
+Verified by running the app binary four times in a row: `exit=0` each time.
 
 ---
 
