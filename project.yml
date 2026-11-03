@@ -6,6 +6,8 @@ options:
   deploymentTarget:
     macOS: "14.0"
 packages:
+  SeekDeepCore:
+    path: core
   BareKit:
     url: https://github.com/holepunchto/bare-kit-swift
     branch: main
@@ -40,8 +42,13 @@ targets:
         com.apple.security.network.client: true
         com.apple.security.network.server: true
     dependencies:
+      - package: SeekDeepCore
       - package: BareKit
     scheme:
+      environmentVariables:
+        SEEKDEEP_DEV_TRANSPORT: process
+      testTargets:
+        - SeekDeepTests
       preActions:
         - name: Link
           script: |
@@ -52,3 +59,13 @@ targets:
             set -e
             PATH="${PATH}" "${PWD}/node_modules/.bin/bare-pack" --preset darwin --linked --base ${PWD} --out ${PWD}/app/app.bundle ${PWD}/worklet/backend.js
             test -s "${PWD}/app/app.bundle"
+  SeekDeepTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources: [Tests]
+    dependencies:
+      - package: SeekDeepCore
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: "5.0"

@@ -3,7 +3,7 @@ import Foundation
 import SwiftUI
 
 /// Boot probe: proves the packed worklet loads, answers a real RPC request, and that
-/// `Bare.IPC` round-trips through BareKit. Replaced by the real transports in Phase 3.
+/// `Bare.IPC` round-trips through BareKit. Phase 3 replaces this with the real transports.
 final class WorkletProbe: @unchecked Sendable {
     private var worklet: Worklet?
     private var ipc: IPC?
@@ -23,8 +23,7 @@ final class WorkletProbe: @unchecked Sendable {
             log("[probe] worklet started, storage=\(storage.path)")
 
             Task { [weak self] in
-                guard let self else { return }
-                guard let ipc = self.ipc else { return }
+                guard let self, let ipc = self.ipc else { return }
                 let request = #"{"id":"1","method":"chat.status","params":{}}"# + "\n"
                 try? await ipc.write(Data(request.utf8))
 
@@ -35,12 +34,8 @@ final class WorkletProbe: @unchecked Sendable {
                         log("[probe] <- \(text.trimmingCharacters(in: .newlines))")
                         if text.contains(#""id":"1""#) {
                             log("[probe] OK: chat.status answered over Bare.IPC")
-                            // Order matters: end the pipe, release the worklet, then
-                            // exit. Exiting with a live worklet aborts the process.
-                            self.ipc?.end()
-                            self.ipc = nil
-                            self.worklet = nil
-                            exit(0)
+                            await self.shutdown(code: 0)
+                            return
                         }
                         if Date() > deadline { break }
                     }
@@ -48,12 +43,25 @@ final class WorkletProbe: @unchecked Sendable {
                     log("[probe] ipc error: \(error)")
                 }
                 log("[probe] FAIL: no chat.status reply within 20s")
-                exit(2)
+                await self.shutdown(code: 2)
             }
         } catch {
             log("[probe] FAIL: \(error)")
             exit(1)
         }
+    }
+
+    /// Order matters: end the pipe, close the IPC, terminate if the worklet is still
+    /// running, and only then exit. Exiting while the worklet thread still runs aborts
+    /// the process.
+    private func shutdown(code: Int32) async {
+        ipc?.end()
+        ipc?.close()
+        ipc = nil
+        worklet?.terminate()
+        _ = await worklet?.wait()
+        worklet = nil
+        exit(code)
     }
 
     private func log(_ message: String) {
@@ -67,7 +75,7 @@ struct SeekDeepApp: App {
 
     var body: some Scene {
         WindowGroup {
-            Text("SeekDeep boot probe — see stdout")
+            Text("SeekDeep boot probe — see stderr")
                 .padding(40)
                 .task { probe.start() }
         }

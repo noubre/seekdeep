@@ -27,7 +27,11 @@ export async function createWorklet ({ ipc, fs, storageRoot, argv = [], fetchImp
     fs,
     harnessLogger: logger
   })
-  // When the host closes its side of the IPC the pipe ends: flush drives, stop the swarm.
-  pipe.once('end', () => { void backend.close().catch(() => {}) })
+  // When the host closes its side of the IPC the pipe ends: flush drives, stop the swarm,
+  // and end our own side. Without that last step the IPC keeps the worklet alive forever
+  // and the host's `worklet.wait()` never returns.
+  pipe.once('end', () => {
+    void backend.close().catch(() => {}).then(() => { try { pipe.end() } catch {} })
+  })
   return { backend, pipe }
 }
