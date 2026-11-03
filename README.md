@@ -28,6 +28,28 @@ A P2P-enabled desktop application that interfaces with multiple local LLM provid
 
 
 
+## Native macOS app (in progress)
+
+The renderer is being replaced by a SwiftUI shell. **The JavaScript core is unchanged** —
+`js/p2p`, `js/llm`, `js/slash` and the plugin harness ship as-is, packed by `bare-pack` and
+run inside the app by BareKit on its own thread. One core, two front-ends while the switch
+over happens.
+
+```bash
+npm ci                      # once
+npm run native:dev:app      # Debug build + Node dev worker (fast loop, needs node)
+npm run native:e2e          # worker + fake provider, asserts a streamed reply
+npm run native:app:release  # Release build with the packed bundle embedded
+npm run native:soak         # 150 turns through one worker: leak/crash check
+cd core && swift test       # the Swift side, no Xcode, no V8, no bundle
+```
+
+`scripts/run-native-app.sh` clears the saved window state on every launch on purpose: macOS
+restores a window by an identifier derived from the SwiftUI view tree, so after any view
+change the restore fails and the app opens **no window at all** — which looks like a hang.
+
+Distribution, signing and notarization notes live in `docs/release.md`.
+
 ## Prerequisites
 
 Before running SeekDeep, make sure you have:

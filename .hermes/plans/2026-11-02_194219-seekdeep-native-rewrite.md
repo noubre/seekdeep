@@ -3516,6 +3516,26 @@ Verified by running the app binary four times in a row: `exit=0` each time.
 
 ---
 
+
+### Phase 6 — as built
+
+Interop dropped, so the acceptance work is: soak, docs, and the two-native-peers case.
+
+- **Soak (`npm run native:soak`, 150 turns)**: all 150 answered, RSS 86 MB → 99 MB (+13 MB over
+  237 s), no crash, zero leftover `node` processes after shutdown. Real numbers from
+  `scripts/soak-worklet.mjs`, which drives the actual worker over stdio.
+- **What the soak taught**: frames on the wire are `{event, data}`, not JSON-RPC
+  `{method, params}`, and response frames carry `{chunk, done}` with no cumulative
+  `content` — a client that assumes either hangs forever or counts zero answers. Two of
+  the script's first three drafts failed exactly that way.
+- **`chat.create` takes ~3.8 s** on a cold worker (worker boot + DHT + plugin harness).
+  Not a hang, and the UI must not treat it as one — the empty state shows before the room
+  exists.
+- README now documents the native scripts and the window-state trap; `docs/release.md`
+  owns signing.
+- Still open: two native instances in one room (collaborative), which needs either UI
+  automation or a `--topic` join flag on the dev worklet.
+
 ## Phase 7 — retire the Electron renderer (blocked on approval)
 
 Do **not** start this phase without an explicit "go" from the owner. It is listed so the

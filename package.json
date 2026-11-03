@@ -64,7 +64,8 @@
     "native:dev": "node worklet/dev.js --stdio",
     "native:dev:app": "bash scripts/run-native-app.sh",
     "native:e2e": "node scripts/e2e-worklet.mjs",
-    "native:app:release": "xcodegen generate && xcodebuild -scheme SeekDeep -derivedDataPath build -configuration Release build"
+    "native:app:release": "xcodegen generate && xcodebuild -scheme SeekDeep -derivedDataPath build -configuration Release build",
+    "native:soak": "node scripts/soak-worklet.mjs --turns 150"
   },
   "dependencies": {
     "b4a": "^1.6.4",
