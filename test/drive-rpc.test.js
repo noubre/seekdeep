@@ -51,6 +51,22 @@ const methods = {
   'drive.get': { validate(params) { return [params.ref, params.path]; }, invoke: async (ref, path) => ({ ref, path, content: 'ok' }) }
 };
 
+/**
+ * Explicit fakes for the peer services the backend wires up. The runtime no
+ * longer infers fakes from a `service` override, so every injected service must
+ * be supplied by the caller.
+ */
+function stubRpcServices(drive) {
+  const close = async () => {};
+  return {
+    service: drive,
+    localdriveService: { close },
+    mirrorService: { close },
+    beamService: { close },
+    disableHarness: true
+  };
+}
+
 test('RPC client/server correlate concurrent replies and lazily reuse one Pear-compatible duplex pipe', async function (t) {
   const [clientPipe, serverPipe] = duplexPair();
   let pipeCalls = 0;
@@ -303,7 +319,7 @@ test('runtime storage resolution is app-scoped and backend shutdown is idempoten
   const end = pipe.end.bind(pipe);
   pipe.end = (...args) => { pipeEnds += 1; return end(...args); };
   const service = { close: async () => { serviceCloses += 1; } };
-  const backend = createWorkerBackend(pipe, { service });
+  const backend = await createWorkerBackend(pipe, stubRpcServices(service));
   await Promise.all([backend.close(), backend.close()]);
   t.is(serviceCloses, 1);
   t.is(pipeEnds, 1);
@@ -313,7 +329,7 @@ test('backend shutdown still closes the service when RPC shutdown fails', async 
   const pipe = new PassThrough();
   pipe.end = () => { throw new Error('forced pipe close failure'); };
   let serviceCloses = 0;
-  const backend = createWorkerBackend(pipe, { service: { close: async () => { serviceCloses += 1; } } });
+  const backend = await createWorkerBackend(pipe, stubRpcServices({ close: async () => { serviceCloses += 1; } }));
   await t.exception.all(() => backend.close(), /shutdown failed/i);
   t.is(serviceCloses, 1);
   pipe.destroy();
@@ -336,7 +352,7 @@ test('backend shutdown drains an in-flight RPC operation before closing drive st
     },
     async close() { events.push('service-close'); }
   };
-  const backend = createWorkerBackend(serverPipe, { service });
+  const backend = await createWorkerBackend(serverPipe, stubRpcServices(service));
   const client = createRpcClient({ pipeFactory: () => clientPipe, timeout: 1000 });
   const request = client.request('drive.list', {}).catch((error) => error);
   await started;

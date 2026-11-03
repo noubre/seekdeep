@@ -8,16 +8,17 @@ import {
   chatMessagesEl,
   activeUsersEl,
   modelSelect,
+  providerSelect,
   chatModeSelect,
   setChatModeSelectValue,
-  setChatModeSelectEnabled
+  setChatModeSelectEnabled,
+  updateTopicDisplay
 } from './elements.js';
 import { renderAssistantContent } from '../messages/formatting.js';
 import { formatModelName } from '../llm/models.js';
 import { getHistory, subscribe as subscribeStore } from '../messages/store.js';
 import { getState, subscribe as subscribeState } from '../session/client-state.js';
 import {
-  ensureChatLog,
   getEphemeralAnchor,
   getHistoryMessageId,
   isNearBottom,
@@ -112,10 +113,6 @@ function createMessageElement(message) {
       messageEl.classList.add('message-system');
       messageEl.textContent = messageContent;
       break;
-    case 'thinking':
-      messageEl.classList.add('message-thinking');
-      messageEl.textContent = messageContent;
-      break;
     default:
       messageEl.textContent = JSON.stringify(message);
   }
@@ -130,7 +127,6 @@ function createMessageElement(message) {
 function updateChatDisplay() {
   if (!chatMessagesEl) return;
 
-  ensureChatLog(chatMessagesEl);
   const scrollPosition = captureScrollPosition(chatMessagesEl);
   const chatHistory = getHistory();
 
@@ -175,8 +171,7 @@ function updateActiveUsersDisplay() {
   activeUsersEl.innerHTML = '';
 
   const youChip = document.createElement('div');
-  youChip.className = 'user-chip';
-  youChip.style.backgroundColor = '#4A6BBF';
+  youChip.className = 'user-chip user-chip-self';
   youChip.textContent = 'You';
   activeUsersEl.appendChild(youChip);
 
@@ -207,6 +202,19 @@ function updateModelSelectFromState() {
   }
 }
 
+function updateRoomDisplayFromState() {
+  updateTopicDisplay(getState().topic);
+}
+
+function updateProviderSelectFromState() {
+  if (!providerSelect) return;
+  const { provider, role } = getState();
+  const hasProvider = Array.from(providerSelect.options)
+    .some((option) => option.value === provider);
+  if (hasProvider) providerSelect.value = provider;
+  providerSelect.disabled = role !== 'host';
+}
+
 function updateModeSelectFromState() {
   if (!chatModeSelect) return;
   const { collaborative, role } = getState();
@@ -215,7 +223,9 @@ function updateModeSelectFromState() {
 }
 
 function renderClientState() {
+  updateRoomDisplayFromState();
   updateActiveUsersDisplay();
+  updateProviderSelectFromState();
   updateModelSelectFromState();
   updateModeSelectFromState();
 }
@@ -234,9 +244,6 @@ function initializeRendering() {
 }
 
 export {
-  PEER_COLOR_CLASSES,
-  createMessageElement,
   updateChatDisplay,
-  updateActiveUsersDisplay,
   initializeRendering
 };

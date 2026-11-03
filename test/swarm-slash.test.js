@@ -1,5 +1,5 @@
 import test from 'brittle';
-import { dispatchSlashTag } from '../js/slash/registry.js';
+import { dispatchSlashTag } from './helpers/slash-runtime.js';
 import { createSwarmService } from '../js/slash/services/swarm.js';
 
 const TOPIC = 'ab'.repeat(32);

@@ -1,18 +1,18 @@
-import { rpcClient } from '../../p2p/rpc-client.js';
+import { createRpcFacade } from './facade.js';
 
-function createBeamService(client = rpcClient) {
-  if (!client || typeof client.request !== 'function') throw new TypeError('Beam RPC client is required');
-  return Object.freeze({
-    create: (name) => client.request('beam.create', { name }),
-    join: (name, key) => client.request('beam.join', { name, key }),
-    list: () => client.request('beam.list', {}),
-    status: (ref) => client.request('beam.status', { ref }),
-    send: (ref, content) => client.request('beam.send', { ref, content }),
-    receive: (ref) => client.request('beam.receive', { ref }),
-    close: (ref) => client.request('beam.close', { ref })
+function createBeamService(client) {
+  return createRpcFacade({
+    client,
+    label: 'Beam',
+    methods: {
+      create: { rpc: 'beam.create', params: (name) => ({ name }) },
+      join: { rpc: 'beam.join', params: (name, key) => ({ name, key }) },
+      list: { rpc: 'beam.list', params: () => ({}) },
+      status: { rpc: 'beam.status', params: (ref) => ({ ref }) },
+      send: { rpc: 'beam.send', params: (ref, content) => ({ ref, content }) },
+      receive: { rpc: 'beam.receive', params: (ref) => ({ ref }) },
+      close: { rpc: 'beam.close', params: (ref) => ({ ref }) }
+    }
   });
 }
-
-const beamService = createBeamService();
-
-export { createBeamService, beamService };
+export { createBeamService };

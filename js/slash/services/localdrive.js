@@ -1,18 +1,18 @@
-import { rpcClient } from '../../p2p/rpc-client.js';
+import { createRpcFacade } from './facade.js';
 
-function createLocaldriveService(client = rpcClient) {
-  if (!client || typeof client.request !== 'function') throw new TypeError('Localdrive RPC client is required');
-  return Object.freeze({
-    add: (name, root, writable = false) => client.request('localdrive.add', { name, root, writable }),
-    list: () => client.request('localdrive.list', {}),
-    status: (ref) => client.request('localdrive.status', { ref }),
-    files: (ref, prefix) => client.request('localdrive.files', prefix === undefined ? { ref } : { ref, prefix }),
-    get: (ref, path) => client.request('localdrive.get', { ref, path }),
-    put: (ref, path, content) => client.request('localdrive.put', { ref, path, content }),
-    remove: (ref) => client.request('localdrive.remove', { ref })
+function createLocaldriveService(client) {
+  return createRpcFacade({
+    client,
+    label: 'Localdrive',
+    methods: {
+      add: { rpc: 'localdrive.add', params: (name, root, writable = false) => ({ name, root, writable }) },
+      list: { rpc: 'localdrive.list', params: () => ({}) },
+      status: { rpc: 'localdrive.status', params: (ref) => ({ ref }) },
+      files: { rpc: 'localdrive.files', params: (ref, prefix) => (prefix === undefined ? { ref } : { ref, prefix }) },
+      get: { rpc: 'localdrive.get', params: (ref, path) => ({ ref, path }) },
+      put: { rpc: 'localdrive.put', params: (ref, path, content) => ({ ref, path, content }) },
+      remove: { rpc: 'localdrive.remove', params: (ref) => ({ ref }) }
+    }
   });
 }
-
-const localdriveService = createLocaldriveService();
-
-export { createLocaldriveService, localdriveService };
+export { createLocaldriveService };

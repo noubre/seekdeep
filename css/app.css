@@ -73,17 +73,6 @@
       word-wrap: break-word;
     }
     
-    .message-system {
-      background-color: #343952;
-      color: #a0a8bd;
-      font-style: italic;
-      text-align: center;
-      margin: 5px auto;
-      padding: 5px 10px;
-      border-radius: 8px;
-      max-width: 90%;
-    }
-
     .message-ephemeral {
       background-color: #2B3445;
       border: 1px dashed #81A1C1;
@@ -119,60 +108,6 @@
       background-color: #3B4252;
       border-bottom-left-radius: 0;
       border-left: 3px solid #81A1C1;
-      margin-right: auto;
-    }
-    
-    /* Conversation thread styles */
-    .conversation-thread {
-      display: flex;
-      flex-direction: column;
-      margin-bottom: 24px;
-      position: relative;
-    }
-    
-    /* Connector line between question and answer */
-    .conversation-thread::before {
-      content: '';
-      position: absolute;
-      left: 20px;
-      top: 0;
-      bottom: 0;
-      width: 2px;
-      background-color: rgba(255, 255, 255, 0.1);
-      z-index: 0;
-    }
-    
-    /* User's own thread doesn't need the line on the left */
-    .conversation-thread.own-thread::before {
-      left: auto;
-      right: 20px;
-    }
-    
-    /* Thread attribution label */
-    .thread-attribution {
-      font-size: 0.75em;
-      color: #a0a8bd;
-      margin: 5px 0;
-      padding: 2px 5px;
-      border-radius: 4px;
-      background-color: rgba(0, 0, 0, 0.2);
-      align-self: flex-start;
-      display: flex;
-      align-items: center;
-    }
-    
-    .thread-attribution .user-indicator {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      margin-right: 5px;
-    }
-    
-    .message-thinking {
-      background-color: #2E3746;
-      font-style: italic;
-      color: #a0a8bd;
-      border-left: 3px solid #A3BE8C;
       margin-right: auto;
     }
     
@@ -215,43 +150,8 @@
       justify-content: space-between;
     }
     
-    .message-header .timestamp {
-      font-size: 0.7em;
-      font-weight: normal;
-      color: rgba(255, 255, 255, 0.6);
-    }
-    
-    .message-header .responding-to {
-      font-size: 0.8em;
-      font-weight: normal;
-      color: rgba(255, 255, 255, 0.8);
-      margin-left: 8px;
-      padding: 2px 6px;
-      border-radius: 10px;
-      background-color: rgba(0, 0, 0, 0.3);
-    }
-    
     .message-body {
       margin-top: 5px;
-    }
-    
-    .thinking-section {
-      background-color: #2D3343;
-      padding: 10px;
-      border-radius: 8px;
-      margin: 10px 0;
-      position: relative;
-    }
-    
-    .thinking-header {
-      position: absolute;
-      top: -10px;
-      left: 10px;
-      background-color: #81A1C1;
-      padding: 2px 8px;
-      border-radius: 8px;
-      font-size: 0.8em;
-      color: #1F2430;
     }
     
     #active-users {
@@ -274,15 +174,8 @@
       align-items: center;
     }
     
-    .user-chip .status-indicator {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background-color: #A3BE8C;
-      margin-right: 5px;
-      display: inline-block;
-    }
-    
+    .user-chip-self { background-color: #4A6BBF; }
+
     .peer-color-1 { background-color: #4A6BBF; }
     .peer-color-2 { background-color: #3FA796; }
     .peer-color-3 { background-color: #8A6BE0; }
@@ -593,112 +486,6 @@
       display: none !important;
     }
     
-    /* Markdown styles */
-    .markdown-content {
-      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-      line-height: 1.6;
-    }
-    
-    .markdown-content h1, 
-    .markdown-content h2, 
-    .markdown-content h3, 
-    .markdown-content h4, 
-    .markdown-content h5, 
-    .markdown-content h6 {
-      margin-top: 16px;
-      margin-bottom: 10px;
-      font-weight: 600;
-      line-height: 1.25;
-      color: #d8dee9;
-    }
-    
-    .markdown-content h1 { font-size: 1.5em; }
-    .markdown-content h2 { font-size: 1.3em; }
-    .markdown-content h3 { font-size: 1.2em; }
-    .markdown-content h4 { font-size: 1.1em; }
-    
-    .markdown-content p {
-      margin-top: 0;
-      margin-bottom: 10px;
-    }
-    
-    .markdown-content code {
-      font-family: SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
-      background-color: rgba(0, 0, 0, 0.2);
-      padding: 2px 4px;
-      border-radius: 3px;
-      font-size: 0.9em;
-    }
-    
-    .markdown-content pre {
-      background-color: rgba(0, 0, 0, 0.3);
-      border-radius: 6px;
-      padding: 12px;
-      overflow: auto;
-      margin: 8px 0;
-    }
-    
-    .markdown-content pre code {
-      background-color: transparent;
-      padding: 0;
-      white-space: pre;
-    }
-    
-    .markdown-content ul, 
-    .markdown-content ol {
-      margin-top: 0;
-      margin-bottom: 10px;
-      padding-left: 20px;
-    }
-    
-    .markdown-content blockquote {
-      margin: 8px 0;
-      padding: 0 10px;
-      border-left: 3px solid #81A1C1;
-      color: #c9d1d9;
-    }
-    
-    .markdown-content a {
-      color: #88C0D0;
-      text-decoration: none;
-    }
-    
-    .markdown-content a:hover {
-      text-decoration: underline;
-    }
-    
-    .markdown-content table {
-      border-collapse: collapse;
-      margin: 15px 0;
-      overflow: auto;
-      width: auto;
-    }
-    
-    .markdown-content table th,
-    .markdown-content table td {
-      border: 1px solid #3B4252;
-      padding: 6px 13px;
-    }
-    
-    .markdown-content table th {
-      font-weight: 600;
-      background-color: #3B4252;
-    }
-    
-    .markdown-content table tr {
-      background-color: #2E3440;
-    }
-    
-    .markdown-content table tr:nth-child(2n) {
-      background-color: #333b4d;
-    }
-    
-    .markdown-content img {
-      max-width: 100%;
-      height: auto;
-      border-radius: 4px;
-    }
-    
     /* History Browser Sidebar Styles */
     #history-overlay {
       position: fixed;
@@ -711,6 +498,10 @@
       display: none;
     }
     
+    #history-overlay.open {
+      display: block;
+    }
+
     #history-sidebar {
       position: fixed;
       top: 0;
@@ -726,6 +517,10 @@
       transform: translateX(-100%);
     }
     
+    #history-sidebar.open {
+      transform: translateX(0);
+    }
+
     .sidebar-header {
       padding: 16px;
       background-color: #171C27;

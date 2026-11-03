@@ -20,20 +20,10 @@ import {
   clearTopicKeyInput,
   setRefreshModelsLoading,
   updateRefreshModelsTooltip,
-  chatModeSelect,
-  chatMessagesEl
+  chatModeSelect
 } from './elements.js';
 import { addMessage, clear } from '../messages/store.js';
-import { dispatchSlashTag } from '../slash/registry.js';
-import { createEphemeralRenderer } from './ephemeral.js';
 import { routePromptSubmission } from './submit-routing.js';
-import { createSwarmService } from '../slash/services/swarm.js';
-import { createDHTService } from '../slash/services/dht.js';
-import { createDriveService } from '../slash/services/drive.js';
-import { createLocaldriveService } from '../slash/services/localdrive.js';
-import { createMirrorService } from '../slash/services/mirror.js';
-import { createBeamService } from '../slash/services/beam.js';
-import { createChatSlashService } from '../slash/services/chat.js';
 import * as sessionStore from '../session/session-store.js';
 import { clearAllSessions } from '../session/storage.js';
 import * as historyBrowser from './history-browser.js';
@@ -42,25 +32,26 @@ function systemMessage(content) {
   addMessage({ type: 'system', content });
 }
 
-function slashServices(chatClient) {
-  const client = chatClient.rpc;
-  return {
-    swarm: createSwarmService(client),
-    dht: createDHTService(client),
-    drive: createDriveService(client),
-    localdrive: createLocaldriveService(client),
-    mirror: createMirrorService(client),
-    beam: createBeamService(client),
-    chat: createChatSlashService(client)
-  };
-}
+/**
+ * Only one composer submission may be in flight at a time. Rapid duplicate
+ * submits (double Enter/click) arrive while the first send is awaited and must
+ * not fan out into a second slash dispatch or worker send.
+ */
+let submissionInFlight = false;
+
+/**
+ * Resolves once the initial room is ready (`{ ok }`). Submits await it once so a
+ * prompt typed immediately after load cannot race `chat.send` ahead of `chat.join`.
+ */
+let pendingRoom = null;
 
 /**
  * Wire DOM event listeners. `chatClient` and `clientState` are injected by main.
  */
-function setupEventListeners({ chatClient, clientState } = {}) {
+function setupEventListeners({ chatClient, clientState, roomReady } = {}) {
   if (!chatClient || !chatClient.api) throw new TypeError('setupEventListeners requires a chat client');
-  const services = slashServices(chatClient);
+
+  pendingRoom = roomReady || null;
 
   const historyToggle = document.getElementById('history-toggle');
   const historyClose = document.getElementById('history-close');
@@ -74,37 +65,55 @@ function setupEventListeners({ chatClient, clientState } = {}) {
   const persistenceCheckbox = document.getElementById('persistence-enabled');
   const exportButton = document.getElementById('export-history');
   const clearButton = document.getElementById('clear-history');
+  if (persistenceCheckbox) persistenceCheckbox.checked = sessionStore.isPersistenceEnabled();
   if (persistenceCheckbox) persistenceCheckbox.addEventListener('change', handlePersistenceToggle);
   if (exportButton) exportButton.addEventListener('click', handleExportHistory);
   if (clearButton) clearButton.addEventListener('click', handleClearHistory);
 
-  if (form) form.addEventListener('submit', (event) => handleFormSubmit(event, chatClient, services));
+  if (form) form.addEventListener('submit', (event) => handleFormSubmit(event, chatClient));
   if (promptArea) promptArea.addEventListener('keydown', handlePromptKeydown);
   if (joinButton) joinButton.addEventListener('click', () => handleJoinButtonClick(chatClient));
   if (topicKeyInput) topicKeyInput.addEventListener('keydown', handleTopicKeyInputKeydown);
 
   if (chatModeSelect) {
     chatModeSelect.addEventListener('change', () => handleChatModeChange(chatClient, clientState));
-    chatModeSelect.value = clientState?.getState().collaborative ? 'collaborative' : 'private';
-    chatModeSelect.disabled = clientState?.getState().role !== 'host';
   }
   if (providerSelect) providerSelect.addEventListener('change', () => handleProviderChange(chatClient));
   if (refreshModelsButton) refreshModelsButton.addEventListener('click', () => handleRefreshModelsClick(chatClient));
 }
 
-async function handleFormSubmit(event, chatClient, services) {
+async function handleFormSubmit(event, chatClient) {
   event.preventDefault();
   const prompt = getPromptValue();
   if (prompt.length === 0) return;
-  const emitEphemeral = createEphemeralRenderer(chatMessagesEl);
-  await routePromptSubmission(prompt, {
-    dispatchSlashTag,
-    emitEphemeral,
-    services,
-    getSelectedModel,
-    clearPromptArea,
-    ask: (model, text) => chatClient.api.send({ prompt: text, model })
-  });
+  if (submissionInFlight) return;
+
+  submissionInFlight = true;
+  try {
+    if (pendingRoom) {
+      const settled = await pendingRoom;
+      pendingRoom = null;
+      if (!settled?.ok) {
+        systemMessage('The chat room is not ready yet. Try again in a moment.');
+        return; // the draft is intentionally kept
+      }
+    }
+    await routePromptSubmission(prompt, {
+      dispatchSlash: (text) => chatClient.dispatchSlash(text),
+      getSelectedModel,
+      // Clear only when the composer still holds the submitted draft: a new
+      // draft typed while the send was pending must survive completion.
+      clearPromptArea: () => {
+        if (getPromptValue() === prompt) clearPromptArea();
+      },
+      ask: (model, text) => chatClient.api.send({ prompt: text, model })
+    });
+  } catch (error) {
+    const message = error?.message || 'unknown send error';
+    systemMessage(`Could not send message: ${message}`);
+  } finally {
+    submissionInFlight = false;
+  }
 }
 
 function handlePromptKeydown(event) {

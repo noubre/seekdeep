@@ -8,12 +8,6 @@ const SCROLL_THRESHOLD = 50;
 const historyMessageIds = new WeakMap();
 const ephemeralAnchors = new WeakMap();
 
-function ensureChatLog(chatMessagesEl) {
-  chatMessagesEl.setAttribute('role', 'log');
-  chatMessagesEl.setAttribute('aria-live', 'polite');
-  chatMessagesEl.setAttribute('aria-relevant', 'additions text');
-}
-
 function isNearBottom(chatMessagesEl) {
   return chatMessagesEl.scrollTop + chatMessagesEl.clientHeight
     >= chatMessagesEl.scrollHeight - SCROLL_THRESHOLD;
@@ -66,8 +60,6 @@ function createEphemeralRenderer(chatMessagesEl) {
     throw new TypeError('Ephemeral rendering requires a chat messages element');
   }
 
-  ensureChatLog(chatMessagesEl);
-
   return function emitEphemeral(content, metadata = {}) {
     const shouldFollow = isNearBottom(chatMessagesEl);
     const safeMetadata = metadata && typeof metadata === 'object' ? metadata : {};
@@ -103,7 +95,6 @@ function createEphemeralRenderer(chatMessagesEl) {
 
 export {
   createEphemeralRenderer,
-  ensureChatLog,
   getEphemeralAnchor,
   getHistoryMessageId,
   isNearBottom,

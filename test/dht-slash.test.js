@@ -1,5 +1,5 @@
 import test from 'brittle';
-import { dispatchSlashTag } from '../js/slash/registry.js';
+import { dispatchSlashTag } from './helpers/slash-runtime.js';
 import { createDHTService } from '../js/slash/services/dht.js';
 
 const PUBLIC_KEY = '12'.repeat(32);

@@ -12,11 +12,13 @@ const samples = {
   handshake: { type: 'handshake', clientId: 'abc123', displayName: 'Peer1', timestamp: 1, isHost: true },
   handshake_ack: { type: 'handshake_ack', serverId: 'server-1' },
   mode_update: { type: 'mode_update', isCollaborativeMode: true, isHost: false },
-  models_update: { type: 'models_update', models: [{ id: 'llama2:7b', name: 'Llama 2', modified_at: '2024-01-01' }] },
+  models_update: { type: 'models_update', models: [{ id: 'llama2:7b', name: 'Llama 2', created: 1704067200 }] },
   model_request: { type: 'model_request' },
   query: { type: 'query', model: 'llama2:7b', prompt: 'hi', requestId: 'req-1', fromPeerId: 'peer-2' },
   response: { type: 'response', requestId: 'req-1', data: 'hello', isComplete: false, isJson: false, isPrivate: true },
-  peer_message: { type: 'peer_message', messageType: 'user', content: 'hi there', fromPeer: 'Host', requestId: 'req-1' }
+  peer_message: { type: 'peer_message', messageType: 'user', content: 'hi there', fromPeer: 'Host', requestId: 'req-1' },
+  chat_query: { type: 'chat_query', requestId: 'req-2', model: 'llama2:7b', messages: [{ role: 'user', content: 'hi' }], tools: [{ name: 'get_time', description: '', parametersJson: '{}' }], temperature: 0.5, maxTokens: 128, stop: ['END'], fromPeerId: 'peer-2' },
+  chat_response: { type: 'chat_response', requestId: 'req-2', kind: 'text', text: 'hello' }
 };
 
 test('every peer message type round-trips through serialize/parse', async function (t) {
@@ -63,6 +65,22 @@ test('non-JSON, non-object, and malformed model payloads are rejected', async fu
   t.exception.all(() => parsePeerMessage(b4a.from('"hello"')), /plain object/i);
   t.exception.all(() => parsePeerMessage(serializeRaw({ type: 'models_update', models: [{ id: 'a' }] })), /name/i);
   t.exception.all(() => parsePeerMessage(serializeRaw({ type: 'models_update', models: [{ id: 'a', name: 'b', extra: true }] })), /unsupported field/i);
+});
+
+test('chat frames reject malformed payloads', async function (t) {
+  const query = { type: 'chat_query', requestId: 'r', model: 'm', messages: [{ role: 'user', content: 'hi' }] };
+  t.alike(parsePeerMessage(serializeRaw(query)), query);
+  t.exception.all(() => parsePeerMessage(serializeRaw({ ...query, messages: 'nope' })), /array/i);
+  t.exception.all(() => parsePeerMessage(serializeRaw({ ...query, messages: [{ role: 'robot', content: 'x' }] })), /role/i);
+  t.exception.all(() => parsePeerMessage(serializeRaw({ type: 'chat_response', requestId: 'r', kind: 'nope' })), /kind/i);
+  t.exception.all(() => parsePeerMessage(serializeRaw({ type: 'chat_response', requestId: 'r', kind: 'text' })), /text/i);
+  t.alike(parsePeerMessage(serializeRaw({ type: 'chat_response', requestId: 'r', kind: 'done', finishReason: 'stop' })).kind, 'done');
+});
+
+test('the response frame may carry an error message', async function (t) {
+  const frame = { type: 'response', requestId: 'r', data: '', isComplete: true, isJson: false, isPrivate: true, error: 'boom' };
+  t.alike(parsePeerMessage(serializeRaw(frame)), frame);
+  t.exception.all(() => parsePeerMessage(serializeRaw({ ...frame, error: '' })), /error/i);
 });
 
 function serializeRaw(message) {

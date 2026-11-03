@@ -6,6 +6,7 @@
  * worker; this module only speaks JSON-RPC over the Pear worker pipe.
  */
 import { createRpcClient } from './p2p/rpc-client.js';
+import { isSlashTag } from './slash/parser.js';
 
 const CHAT_METHODS = Object.freeze([
   'chat.status',
@@ -42,6 +43,21 @@ function initializeChatClient(options = {}) {
     onEvent(handler) {
       if (typeof handler !== 'function') throw new TypeError('onEvent requires a function');
       return rpc.on('chat.event', handler);
+    },
+    /**
+     * Dispatch slash input in the worker harness. Non-slash text is short
+     * circuited here so ordinary prompts never pay an RPC round trip.
+     */
+    dispatchSlash(text) {
+      if (!isSlashTag(text)) return Promise.resolve(false);
+      return rpc.request('slash.dispatch', { text }).then((result) => Boolean(result?.handled));
+    },
+    listSlash() {
+      return rpc.request('slash.list', {});
+    },
+    onHarnessEvent(handler) {
+      if (typeof handler !== 'function') throw new TypeError('onHarnessEvent requires a function');
+      return rpc.on('harness.event', handler);
     },
     close() { rpc.close(); },
     rpc

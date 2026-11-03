@@ -1,6 +1,6 @@
 /**
  * Provider router: selects between Ollama and LM Studio and exposes a single
- * `listModels` / `ask` surface to the chat service. Pure (no DOM, no UI).
+ * `listModels` / `ask` / `chat` surface to the chat service. Pure (no DOM, no UI).
  */
 import { createOllama } from './ollama.js';
 import { createLMStudio } from './lmstudio.js';
@@ -38,6 +38,10 @@ function createProviderRouter(options = {}) {
     return resolve(provider).ask(model, prompt, askOptions);
   }
 
+  async function chat(provider, model, params = {}, onEvent) {
+    return resolve(provider).chat(model, params, onEvent);
+  }
+
   async function isAvailable(provider) {
     try {
       await listModels(provider, { signal: AbortSignal.timeout(5000) });
@@ -45,11 +49,6 @@ function createProviderRouter(options = {}) {
     } catch {
       return false;
     }
-  }
-
-  async function getAvailableProviders() {
-    const checks = await Promise.all(PROVIDERS.map(async (provider) => ({ provider, available: await isAvailable(provider) })));
-    return checks.filter((check) => check.available).map((check) => check.provider);
   }
 
   async function autoSelect() {
@@ -64,13 +63,9 @@ function createProviderRouter(options = {}) {
     baseUrls: Object.freeze({ ...baseUrls }),
     listModels,
     ask,
+    chat,
     isAvailable,
-    getAvailableProviders,
-    autoSelect,
-    getProviderInfo(provider) {
-      const instance = resolve(provider);
-      return { name: provider, baseUrl: instance.baseUrl, provider: instance.provider };
-    }
+    autoSelect
   });
 }
 

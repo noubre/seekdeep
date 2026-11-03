@@ -1,20 +1,20 @@
-import { rpcClient } from '../../p2p/rpc-client.js';
+import { createRpcFacade } from './facade.js';
 
-function createDriveService(client = rpcClient) {
-  if (!client || typeof client.request !== 'function') throw new TypeError('Drive RPC client is required');
-  return Object.freeze({
-    create: (name) => client.request('drive.create', { name }),
-    open: (key, name) => client.request('drive.open', name === undefined ? { key } : { key, name }),
-    list: () => client.request('drive.list', {}),
-    status: (ref) => client.request('drive.status', { ref }),
-    put: (ref, path, content) => client.request('drive.put', { ref, path, content }),
-    get: (ref, path) => client.request('drive.get', { ref, path }),
-    files: (ref, prefix) => client.request('drive.files', prefix === undefined ? { ref } : { ref, prefix }),
-    del: (ref, path) => client.request('drive.del', { ref, path }),
-    close: (ref) => client.request('drive.close', { ref })
+function createDriveService(client) {
+  return createRpcFacade({
+    client,
+    label: 'Drive',
+    methods: {
+      create: { rpc: 'drive.create', params: (name) => ({ name }) },
+      open: { rpc: 'drive.open', params: (key, name) => (name === undefined ? { key } : { key, name }) },
+      list: { rpc: 'drive.list', params: () => ({}) },
+      status: { rpc: 'drive.status', params: (ref) => ({ ref }) },
+      put: { rpc: 'drive.put', params: (ref, path, content) => ({ ref, path, content }) },
+      get: { rpc: 'drive.get', params: (ref, path) => ({ ref, path }) },
+      files: { rpc: 'drive.files', params: (ref, prefix) => (prefix === undefined ? { ref } : { ref, prefix }) },
+      del: { rpc: 'drive.del', params: (ref, path) => ({ ref, path }) },
+      close: { rpc: 'drive.close', params: (ref) => ({ ref }) }
+    }
   });
 }
-
-const driveService = createDriveService();
-
-export { createDriveService, driveService };
+export { createDriveService };

@@ -4,10 +4,15 @@ import Hyperswarm from 'hyperswarm';
 import b4a from 'b4a';
 import crypto from 'hypercore-crypto';
 import path from 'path';
+import {
+  MAX_NAME_CHARS,
+  positiveInteger,
+  normalizePrintableName,
+  isPrintableReference,
+  closeAllRecords
+} from './service-kit.js';
 
 const KEY_PATTERN = /^[0-9a-f]{64}$/i;
-const CONTROL_PATTERN = /[\u0000-\u001f\u007f]/;
-const MAX_NAME_CHARS = 80;
 const MAX_PATH_BYTES = 512;
 const MAX_CONTENT_BYTES = 64 * 1024;
 const MAX_FILES = 100;
@@ -16,12 +21,9 @@ const READ_TIMEOUT = 10000;
 const MAX_SWARM_PEERS = 32;
 
 function normalizeName(value) {
-  if (typeof value !== 'string') throw new TypeError('Drive name must be a string');
-  const name = value.normalize('NFC').trim().replace(/\s+/gu, ' ');
-  if (!name || name.length > MAX_NAME_CHARS || CONTROL_PATTERN.test(name)) {
-    throw new TypeError(`Drive name must be 1-${MAX_NAME_CHARS} printable characters`);
-  }
-  return name;
+  const name = normalizePrintableName(value);
+  if (name) return name;
+  throw new TypeError(typeof value === 'string' ? `Drive name must be 1-${MAX_NAME_CHARS} printable characters` : 'Drive name must be a string');
 }
 
 function normalizeKey(value) {
@@ -33,7 +35,7 @@ function normalizeKey(value) {
 
 function normalizeDrivePath(value, { allowRoot = false } = {}) {
   if (typeof value !== 'string') throw new TypeError('Drive path must be a string');
-  if (!value || value.includes('\0') || value.includes('\\') || CONTROL_PATTERN.test(value)) {
+  if (!isPrintableReference(value, { maxChars: Number.POSITIVE_INFINITY }) || value.includes('\\')) {
     throw new TypeError('Drive path contains invalid characters');
   }
   const withRoot = value.startsWith('/') ? value : `/${value}`;
@@ -68,11 +70,6 @@ function withTimeout(promise, milliseconds, message) {
     observed,
     new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(message)), milliseconds); })
   ]).finally(() => clearTimeout(timer));
-}
-
-function positiveInteger(value, label) {
-  if (!Number.isSafeInteger(value) || value < 1) throw new TypeError(`${label} must be a positive integer`);
-  return value;
 }
 
 function createDefaultSwarmFactory(maxPeers = MAX_SWARM_PEERS, Swarm = Hyperswarm) {
@@ -136,7 +133,7 @@ function createHyperdriveService(options = {}) {
   }
 
   function resolve(reference, { requireOpen = true } = {}) {
-    if (typeof reference !== 'string' || !reference || CONTROL_PATTERN.test(reference)) {
+    if (!isPrintableReference(reference, { maxChars: Number.POSITIVE_INFINITY })) {
       throw new TypeError('Drive reference must be a non-empty string');
     }
     const id = records.has(reference) ? reference : idsByName.get(reference.toLowerCase());
@@ -368,10 +365,7 @@ function createHyperdriveService(options = {}) {
     async close() {
       if (closingPromise) return closingPromise;
       shutdownStarted = true;
-      const attempt = opening.then(() => Promise.allSettled(Array.from(records.values(), closeRecord))).then((results) => {
-        const errors = results.filter((result) => result.status === 'rejected').map((result) => result.reason);
-        if (errors.length) throw new AggregateError(errors, 'Drive service shutdown failed');
-      });
+      const attempt = opening.then(() => closeAllRecords(records.values(), closeRecord, 'Drive service shutdown failed'));
       closingPromise = attempt;
       try {
         return await attempt;
@@ -385,12 +379,8 @@ function createHyperdriveService(options = {}) {
 export {
   MAX_CONTENT_BYTES,
   MAX_FILES,
-  MAX_PATH_BYTES,
-  MAX_SWARM_PEERS,
   createDefaultSwarmFactory,
   normalizeDrivePath,
-  normalizeKey,
-  normalizeName,
   createHyperdriveService,
   withTimeout
 };

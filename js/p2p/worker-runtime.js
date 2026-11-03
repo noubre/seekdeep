@@ -5,6 +5,9 @@ import { createMirrorService } from './mirror-service.js';
 import { createBeamService } from './beam-service.js';
 import { createChatService } from './chat-service.js';
 import { createResourceRpcMethods, createJsonRpcServer } from './rpc-server.js';
+import { createBotService } from './bot-service.js';
+import { createHarness } from '../harness/harness.js';
+import { createHarnessSync } from '../harness/sync.js';
 
 const DRIVE_STORAGE_DIRECTORY = 'seekdeep-hyperdrives-v1';
 const LOCALDRIVE_STORAGE_DIRECTORY = 'seekdeep-localdrives-v1';
@@ -32,31 +35,23 @@ function resolveLocaldriveStorageRoot(config) {
   return path.join(resolveAppStorage(config), LOCALDRIVE_STORAGE_DIRECTORY);
 }
 
-function unavailableLocaldriveService() {
-  const unavailable = async () => { throw new Error('Localdrive service is unavailable'); };
-  return Object.freeze({
-    add: unavailable,
-    list: unavailable,
-    status: unavailable,
-    files: unavailable,
-    get: unavailable,
-    put: unavailable,
-    remove: unavailable,
-    close: async () => {}
-  });
+/**
+ * Locate the bundled `plugins/` directory. In the Bare worker this resolves
+ * relative to this module; the Pear config directory is the fallback.
+ */
+function resolveBuiltinPluginsDir() {
+  try {
+    if (typeof import.meta !== 'undefined' && typeof import.meta.url === 'string' && import.meta.url) {
+      const modulePath = decodeURIComponent(import.meta.url.replace(/^file:\/\//, '').split('?')[0].split('#')[0]);
+      return path.resolve(path.dirname(modulePath), '..', '..', 'plugins');
+    }
+  } catch {}
+  const dir = globalThis.Pear?.config?.dir;
+  if (typeof dir === 'string' && dir) return path.join(dir, 'plugins');
+  return null;
 }
 
-function unavailableMirrorService() {
-  const unavailable = async () => { throw new Error('Mirror service is unavailable'); };
-  return Object.freeze({ start: unavailable, status: unavailable, stop: unavailable, close: async () => {} });
-}
-
-function unavailableBeamService() {
-  const unavailable = async () => { throw new Error('Beam service is unavailable'); };
-  return Object.freeze({ create: unavailable, join: unavailable, list: unavailable, status: unavailable, send: unavailable, receive: unavailable, closeBeam: unavailable, close: async () => {} });
-}
-
-function createWorkerBackend(pipe, options = {}) {
+async function createWorkerBackend(pipe, options = {}) {
   if (!pipe || typeof pipe.on !== 'function' || typeof pipe.write !== 'function') throw new TypeError('Runtime pipe must be duplex');
   const service = options.service || createHyperdriveService({
     storageRoot: options.storageRoot || resolveDriveStorageRoot(options.config),
@@ -65,30 +60,23 @@ function createWorkerBackend(pipe, options = {}) {
     maxPeers: options.maxPeers,
     readTimeout: options.readTimeout
   });
-  // Existing test/injection callers that supply only a Hyperdrive service retain
-  // their narrow fake. Production always creates the real app-scoped Localdrive.
-  const localdriveService = options.localdriveService || (options.service
-    ? unavailableLocaldriveService()
-    : createLocaldriveService({
-        localdriveRoot: options.localdriveRoot || resolveLocaldriveStorageRoot(options.config),
-        maxMappings: options.maxLocaldrives,
-        maxFiles: options.maxLocaldriveFiles
-      }));
-  const mirrorService = options.mirrorService || (options.service
-    ? unavailableMirrorService()
-    : createMirrorService({
-        localdriveService,
-        driveService: service,
-        maxJobs: options.maxMirrorJobs,
-        maxPaths: options.maxMirrorPaths
-      }));
-  const beamService = options.beamService || (options.service
-    ? unavailableBeamService()
-    : createBeamService({
-        maxBeams: options.maxBeams,
-        maxPendingMessages: options.maxBeamPendingMessages,
-        maxBufferBytes: options.maxBeamBufferBytes
-      }));
+  const localdriveService = options.localdriveService || createLocaldriveService({
+    localdriveRoot: options.localdriveRoot || resolveLocaldriveStorageRoot(options.config),
+    maxMappings: options.maxLocaldrives,
+    maxFiles: options.maxLocaldriveFiles,
+    fs: options.fs
+  });
+  const mirrorService = options.mirrorService || createMirrorService({
+    localdriveService,
+    driveService: service,
+    maxJobs: options.maxMirrorJobs,
+    maxPaths: options.maxMirrorPaths
+  });
+  const beamService = options.beamService || createBeamService({
+    maxBeams: options.maxBeams,
+    maxPendingMessages: options.maxBeamPendingMessages,
+    maxBufferBytes: options.maxBeamBufferBytes
+  });
   const chatService = options.chatService || (options.providers
     ? createChatService({
         providers: options.providers,
@@ -98,15 +86,48 @@ function createWorkerBackend(pipe, options = {}) {
         maxPeers: options.maxChatPeers
       })
     : null);
+  const harness = options.harness || (options.disableHarness
+    ? null
+    : await createHarness({
+        storageRoot: resolveAppStorage(options.config),
+        builtinPluginsDir: options.builtinPluginsDir || resolveBuiltinPluginsDir(),
+        userPluginsDir: options.userPluginsDir,
+        syncedPluginsDir: options.syncedPluginsDir,
+        configPath: options.harnessConfigPath,
+        driveService: service,
+        localdriveService: localdriveService,
+        mirrorService: mirrorService,
+        beamService: beamService,
+        chatService,
+        providers: options.providers,
+        initialKey: options.harnessKey,
+        now: options.now,
+        logger: options.harnessLogger,
+        fs: options.fs,
+        createSync: (context) => createHarnessSync(context),
+        createBot: (context) => createBotService({
+          key: context.key,
+          providers: context.providers,
+          model: context.config?.bot?.model || undefined,
+          swarmFactory: options.swarmFactory,
+          now: context.now
+        })
+      }));
   const rpc = createJsonRpcServer(
     pipe,
-    createResourceRpcMethods({ drive: service, localdrive: localdriveService, mirror: mirrorService, beam: beamService, chat: chatService }),
+    createResourceRpcMethods({ drive: service, localdrive: localdriveService, mirror: mirrorService, beam: beamService, chat: chatService, harness }),
     options.rpcOptions
   );
   if (chatService) {
     chatService.onEvent((event) => {
       const { type, ...data } = event;
       rpc.notify('chat.event', { type, ...data }).catch(() => {});
+    });
+  }
+  if (harness) {
+    harness.onEvent((event) => {
+      const { type, ...data } = event;
+      rpc.notify('harness.event', { type, ...data }).catch(() => {});
     });
   }
   let closing = null;
@@ -117,12 +138,14 @@ function createWorkerBackend(pipe, options = {}) {
     mirrorService,
     beamService,
     chatService,
+    harness,
     rpc,
     close() {
       if (closing) return closing;
       closing = (async () => {
         const errors = [];
         try { await rpc.close(); } catch (error) { errors.push(error); }
+        if (harness) { try { await harness.close(); } catch (error) { errors.push(error); } }
         try { await mirrorService.close(); } catch (error) { errors.push(error); }
         try { await beamService.close(); } catch (error) { errors.push(error); }
         if (chatService) { try { await chatService.close(); } catch (error) { errors.push(error); } }

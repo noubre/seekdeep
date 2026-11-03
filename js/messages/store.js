@@ -8,7 +8,6 @@
 const MAX_HISTORY = 100;
 
 let chatHistory = [];
-const activeRequests = new Map();
 const listeners = new Set();
 
 function notify() {
@@ -43,7 +42,6 @@ function addMessage(message) {
 
 function clear() {
   chatHistory = [];
-  activeRequests.clear();
   notify();
 }
 
@@ -58,7 +56,6 @@ function findLastMessageByRequestId(requestId, type = null) {
 
 export {
   MAX_HISTORY,
-  activeRequests,
   getHistory,
   addMessage,
   clear,

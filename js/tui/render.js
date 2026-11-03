@@ -8,6 +8,7 @@
  */
 import { createTheme } from './theme.js';
 import { createBlockRenderer } from './markdown.js';
+import { splitThinking } from '../messages/thinking.js';
 
 const ESCAPE_PATTERN = /\x1b\[[0-9;?]*[ -/]*[@-~]/g;
 const CONTROL_PATTERN = /[\x00-\x08\x0b-\x1f\x7f]/g;
@@ -30,8 +31,6 @@ function createRenderer(options = {}) {
       : 80);
   const markdown = createBlockRenderer(theme);
 
-  const thinkOpenTag = '<' + 'think>';
-  const thinkCloseTag = '<' + '/think>';
   const SPINNER = ['\u280b', '\u2819', '\u2839', '\u2838', '\u283c', '\u2834', '\u2826', '\u2827', '\u2807', '\u280f'];
   const FRAME_MS = 120;
 
@@ -137,26 +136,6 @@ function createRenderer(options = {}) {
     lineOpen = false;
   }
 
-  // Split accumulated raw text into the visible answer (all closed thinking
-  // blocks removed, trailing unclosed block removed) and whether the text now
-  // ends inside an open thinking block.
-  function parseThinking(text) {
-    let answer = '';
-    let index = 0;
-    while (index < text.length) {
-      const open = text.indexOf(thinkOpenTag, index);
-      if (open === -1) {
-        answer += text.slice(index);
-        break;
-      }
-      answer += text.slice(index, open);
-      const close = text.indexOf(thinkCloseTag, open + thinkOpenTag.length);
-      if (close === -1) return { answer, open: true };
-      index = close + thinkCloseTag.length;
-    }
-    return { answer, open: false };
-  }
-
   function banner(info = {}) {
     const storage = info.storage ? stripControls(String(info.storage)) : null;
     out(`${theme.pearBold('\u25c6 SeekDeep')} ${theme.gray('terminal')}\n`);
@@ -187,7 +166,7 @@ function createRenderer(options = {}) {
 
   function assistantChunk(text) {
     raw += stripControls(text);
-    const { answer, open } = parseThinking(raw);
+    const { answer, open } = splitThinking(raw);
     if (open) {
       if (!thinking) {
         thinking = true;

@@ -1,17 +1,22 @@
 import Localdrive from 'localdrive';
 import b4a from 'b4a';
-import crypto from 'hypercore-crypto';
 import path from 'path';
+import {
+  MAX_NAME_CHARS,
+  positiveInteger,
+  normalizePrintableName,
+  isPrintableReference,
+  createIdFactory,
+  allocateId,
+  closeAllRecords
+} from './service-kit.js';
 
-const CONTROL_PATTERN = /[\u0000-\u001f\u007f]/;
 const STORAGE_PREFIX = '@storage/';
-const MAX_LOCAL_NAME_CHARS = 80;
 const MAX_LOCAL_ALIAS_BYTES = 512;
 const MAX_LOCAL_PATH_BYTES = 512;
 const MAX_LOCAL_CONTENT_BYTES = 64 * 1024;
 const MAX_LOCAL_FILES = 100;
 const MAX_LOCAL_MAPPINGS = 32;
-const MAX_ID_ATTEMPTS = 8;
 const FS_METHODS = ['lstat', 'mkdir', 'readFile', 'realpath'];
 const SAFE_LOCALDRIVE_ERROR = Symbol('safeLocaldriveError');
 
@@ -30,18 +35,10 @@ function byteLength(value) {
   return b4a.byteLength(value);
 }
 
-function positiveInteger(value, label) {
-  if (!Number.isSafeInteger(value) || value < 1) throw new TypeError(`${label} must be a positive integer`);
-  return value;
-}
-
 function normalizeLocalName(value) {
-  if (typeof value !== 'string') throw new TypeError('Localdrive name must be a string');
-  const name = value.normalize('NFC').trim().replace(/\s+/gu, ' ');
-  if (!name || name.length > MAX_LOCAL_NAME_CHARS || CONTROL_PATTERN.test(name)) {
-    throw new TypeError(`Localdrive name must be 1-${MAX_LOCAL_NAME_CHARS} printable characters`);
-  }
-  return name;
+  const name = normalizePrintableName(value);
+  if (name) return name;
+  throw new TypeError(typeof value === 'string' ? `Localdrive name must be 1-${MAX_NAME_CHARS} printable characters` : 'Localdrive name must be a string');
 }
 
 function referenceKey(value) {
@@ -49,7 +46,7 @@ function referenceKey(value) {
 }
 
 function normalizedSegments(value, label) {
-  if (typeof value !== 'string' || !value || value.includes('\0') || value.includes('\\') || CONTROL_PATTERN.test(value)) {
+  if (!isPrintableReference(value, { maxChars: Number.POSITIVE_INFINITY }) || value.includes('\\')) {
     throw new TypeError(`${label} contains invalid characters`);
   }
   const segments = value.split('/');
@@ -71,7 +68,7 @@ function normalizeLocalAlias(value) {
 }
 
 function normalizeLocalPath(value, { allowRoot = false } = {}) {
-  if (typeof value !== 'string' || !value || value.includes('\0') || value.includes('\\') || CONTROL_PATTERN.test(value)) {
+  if (!isPrintableReference(value, { maxChars: Number.POSITIVE_INFINITY }) || value.includes('\\')) {
     throw new TypeError('Localdrive path contains invalid characters');
   }
   const rooted = value.startsWith('/') ? value : `/${value}`;
@@ -164,10 +161,6 @@ function sameSnapshot(before, after) {
   return true;
 }
 
-function defaultIdFactory() {
-  return `local-${b4a.toString(crypto.randomBytes(12), 'hex')}`;
-}
-
 function createLocaldriveService(options = {}) {
   if (!options || typeof options !== 'object' || Array.isArray(options)) throw new TypeError('Localdrive service options must be an object');
   const configuredRoot = options.localdriveRoot;
@@ -178,7 +171,7 @@ function createLocaldriveService(options = {}) {
   }
   const LocaldriveConstructor = options.Localdrive || Localdrive;
   const fs = createFilesystem(options.fs);
-  const idFactory = options.idFactory || defaultIdFactory;
+  const idFactory = options.idFactory || createIdFactory('local');
   const maxMappings = positiveInteger(options.maxMappings ?? MAX_LOCAL_MAPPINGS, 'maxMappings');
   const maxFiles = positiveInteger(options.maxFiles ?? MAX_LOCAL_FILES, 'maxFiles');
   if (typeof LocaldriveConstructor !== 'function') throw new TypeError('Localdrive must be a constructor');
@@ -214,7 +207,7 @@ function createLocaldriveService(options = {}) {
   }
 
   function resolve(reference) {
-    if (typeof reference !== 'string' || !reference || reference.length > 160 || CONTROL_PATTERN.test(reference)) {
+    if (!isPrintableReference(reference)) {
       throw new TypeError('Localdrive reference must be a non-empty printable string');
     }
     const id = idsByReference.get(referenceKey(reference));
@@ -345,20 +338,16 @@ function createLocaldriveService(options = {}) {
     if (idsByReference.has(nameKey)) throw safeError('Localdrive name conflicts with an existing id', 'LOCALDRIVE_REFERENCE_IN_USE');
     if (idsByAlias.has(alias)) throw safeError('Localdrive root is already in use', 'LOCALDRIVE_ROOT_IN_USE');
 
-    let id = null;
-    let idKey = null;
-    for (let attempt = 0; attempt < MAX_ID_ATTEMPTS; attempt += 1) {
-      const candidate = idFactory();
-      if (typeof candidate !== 'string' || !candidate || candidate.length > 160 || CONTROL_PATTERN.test(candidate)) {
-        throw new TypeError('Localdrive idFactory returned an invalid id');
-      }
-      const candidateKey = referenceKey(candidate);
-      if (records.has(candidate) || idsByReference.has(candidateKey) || idsByName.has(candidateKey) || candidateKey === nameKey) continue;
-      id = candidate;
-      idKey = candidateKey;
-      break;
-    }
-    if (!id) throw safeError('Unable to allocate a unique Localdrive id', 'LOCALDRIVE_ID_EXHAUSTED');
+    const id = allocateId({
+      idFactory,
+      isTaken: (candidate) => {
+        const candidateKey = referenceKey(candidate);
+        return records.has(candidate) || idsByReference.has(candidateKey) || idsByName.has(candidateKey) || candidateKey === nameKey;
+      },
+      invalidMessage: 'Localdrive idFactory returned an invalid id',
+      exhaustedMessage: () => safeError('Unable to allocate a unique Localdrive id', 'LOCALDRIVE_ID_EXHAUSTED')
+    });
+    const idKey = referenceKey(id);
 
     const { target: rootPath, identity } = await prepareRoot(alias);
     const drive = new LocaldriveConstructor(rootPath, { atomic: true, followLinks: false, followExternalLinks: false });
@@ -419,14 +408,8 @@ function createLocaldriveService(options = {}) {
         return { path: filePath, content: b4a.toString(content), bytes: content.byteLength };
       });
     },
-    put(reference, pathValue, content) {
-      return run('put', async () => {
-        resolve(reference);
-        normalizeLocalPath(pathValue);
-        if (typeof content !== 'string') throw new TypeError('Localdrive content must be text');
-        if (byteLength(content) > MAX_LOCAL_CONTENT_BYTES) throw new RangeError('Localdrive content is too large');
-        throw safeError('Localdrive mapping is read-only', 'LOCALDRIVE_READ_ONLY');
-      });
+    put() {
+      return run('put', async () => { throw safeError('Localdrive mapping is read-only', 'LOCALDRIVE_READ_ONLY'); });
     },
     resolveMirrorSource(reference) {
       return run('resolve', async () => {
@@ -454,11 +437,7 @@ function createLocaldriveService(options = {}) {
     close() {
       if (closing) return closing;
       shutdown = true;
-      const attempt = operations.then(async () => {
-        const results = await Promise.allSettled(Array.from(records.values(), closeRecord));
-        const errors = results.filter((result) => result.status === 'rejected').map((result) => result.reason);
-        if (errors.length) throw new AggregateError(errors, 'Localdrive service shutdown failed');
-      });
+      const attempt = operations.then(() => closeAllRecords(records.values(), closeRecord, 'Localdrive service shutdown failed'));
       closing = attempt.catch((error) => {
         closing = null;
         throw error;
@@ -469,13 +448,8 @@ function createLocaldriveService(options = {}) {
 }
 
 export {
-  MAX_LOCAL_ALIAS_BYTES,
   MAX_LOCAL_CONTENT_BYTES,
-  MAX_LOCAL_FILES,
-  MAX_LOCAL_MAPPINGS,
-  MAX_LOCAL_PATH_BYTES,
   createLocaldriveService,
   normalizeLocalAlias,
-  normalizeLocalName,
   normalizeLocalPath
 };

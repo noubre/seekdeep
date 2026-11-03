@@ -1,6 +1,6 @@
 import test from 'brittle';
 import { readFile } from 'node:fs/promises';
-import { dispatchSlashTag, listSlashTags } from '../js/slash/registry.js';
+import { dispatchSlashTag, listSlashTags } from './helpers/slash-runtime.js';
 
 const KEY = 'a'.repeat(52);
 const base = { id: 'beam-1', name: 'sender', status: 'connecting', connected: false, pending: 0, sentMessages: 0, sentBytes: 0, receivedMessages: 0, receivedBytes: 0 };

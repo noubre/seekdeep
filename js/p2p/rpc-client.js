@@ -1,21 +1,20 @@
-import b4a from 'b4a';
 import {
   DEFAULT_MAX_AGGREGATE_BYTES,
   DEFAULT_MAX_MESSAGE_BYTES,
   assertJsonData,
-  assertPlainDataObject
-} from './rpc-server.js';
+  assertPlainDataObject,
+  concatBytes,
+  decodeFrame,
+  encodeFrame,
+  hasSafeErrorCode,
+  indexOfNewline,
+  toBytes
+} from './rpc-codec.js';
+import { RPC_METHOD_NAMES } from './rpc-methods.js';
 
 const DEFAULT_MAX_PENDING_REQUESTS = 128;
 
-const ALLOWED_METHODS = new Set([
-  'drive.create', 'drive.open', 'drive.list', 'drive.status', 'drive.put',
-  'drive.get', 'drive.files', 'drive.del', 'drive.close',
-  'localdrive.add', 'localdrive.list', 'localdrive.status', 'localdrive.files',
-  'localdrive.get', 'localdrive.put', 'localdrive.remove',
-  'mirror.start', 'mirror.status', 'mirror.stop',
-  'beam.create', 'beam.join', 'beam.list', 'beam.status', 'beam.send', 'beam.receive', 'beam.close'
-]);
+const ALLOWED_METHODS = new Set(RPC_METHOD_NAMES);
 
 
 function defaultPipeFactory() {
@@ -38,7 +37,7 @@ function createRpcClient(options = {}) {
   if (!Number.isSafeInteger(maxAggregateBytes) || maxAggregateBytes < maxMessageBytes) throw new TypeError('maxAggregateBytes must be an integer of at least maxMessageBytes');
   if (!Number.isSafeInteger(maxPendingRequests) || maxPendingRequests < 1) throw new TypeError('maxPendingRequests must be a positive integer');
   let pipe = null;
-  let buffered = b4a.alloc(0);
+  let buffered = new Uint8Array(0);
   let counter = 0;
   let closed = false;
   const pending = new Map();
@@ -63,7 +62,7 @@ function createRpcClient(options = {}) {
     if (pipe !== target) return;
     detach(target);
     pipe = null;
-    buffered = b4a.alloc(0);
+    buffered = new Uint8Array(0);
     rejectPending(error);
   }
 
@@ -90,7 +89,7 @@ function createRpcClient(options = {}) {
 
   function handleLine(line) {
     try {
-      const parsed = JSON.parse(b4a.toString(line));
+      const parsed = JSON.parse(decodeFrame(line));
       if (
         parsed && typeof parsed === 'object' && !Array.isArray(parsed) &&
         typeof parsed.event === 'string' && Reflect.ownKeys(parsed).length === 2 && Object.hasOwn(parsed, 'data')
@@ -112,8 +111,7 @@ function createRpcClient(options = {}) {
       } else if (response.ok === false && !Object.hasOwn(response, 'result') && Reflect.ownKeys(response).length === 3 && (
         typeof response.error === 'string' || (
           response.error && Object.getPrototypeOf(response.error) === Object.prototype &&
-          Reflect.ownKeys(response.error).length === 2 && typeof response.error.code === 'string' &&
-          (response.error.code.startsWith('LOCALDRIVE_') || response.error.code.startsWith('MIRROR_')) && typeof response.error.message === 'string'
+          Reflect.ownKeys(response.error).length === 2 && hasSafeErrorCode(response.error.code) && typeof response.error.message === 'string'
         )
       )) {
       } else {
@@ -135,13 +133,13 @@ function createRpcClient(options = {}) {
   }
 
   function onData(chunk) {
-    const incoming = b4a.from(chunk);
+    const incoming = toBytes(chunk);
     if (incoming.byteLength > maxAggregateBytes || buffered.byteLength + incoming.byteLength > maxAggregateBytes) {
       return malformed(new Error('RPC aggregate response is too large'));
     }
-    buffered = b4a.concat([buffered, incoming]);
+    buffered = concatBytes(buffered, incoming);
     let newline;
-    while ((newline = b4a.indexOf(buffered, 10)) !== -1) {
+    while ((newline = indexOfNewline(buffered)) !== -1) {
       if (newline + 1 > maxMessageBytes) return malformed(new Error('RPC response is too large'));
       const line = buffered.subarray(0, newline);
       buffered = buffered.subarray(newline + 1);
@@ -174,7 +172,7 @@ function createRpcClient(options = {}) {
       return Promise.reject(error);
     }
     const id = String(++counter);
-    const frame = b4a.from(`${JSON.stringify({ id, method, params })}\n`);
+    const frame = encodeFrame({ id, method, params });
     if (frame.byteLength > maxMessageBytes) return Promise.reject(new RangeError('RPC request is too large'));
     if (pending.size >= maxPendingRequests) return Promise.reject(new RangeError('RPC pending request limit reached'));
     let target;
@@ -231,7 +229,7 @@ function createRpcClient(options = {}) {
         pipe = null;
         if (!target.destroyed && !target.writableEnded) target.end?.();
       }
-      buffered = b4a.alloc(0);
+      buffered = new Uint8Array(0);
       rejectPending(new Error('RPC client closed'));
     }
   });

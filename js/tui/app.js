@@ -7,7 +7,8 @@
  */
 import readline from 'node:readline';
 import { createClientState } from '../session/client-state.js';
-import { addMessage, findLastMessageByRequestId, clear as clearMessages } from '../messages/store.js';
+import { clear as clearMessages } from '../messages/store.js';
+import { applyAssistantChunk } from '../messages/stream.js';
 import { createRenderer } from './render.js';
 import { createTheme } from './theme.js';
 import { classify, TUI_COMMANDS } from './commands.js';
@@ -85,16 +86,8 @@ function createTui(options = {}) {
     const { requestId, chunk, done } = event;
     if (streamRequestId !== requestId) startStream(requestId);
     if (chunk) renderer.assistantChunk(chunk);
-    let message = findLastMessageByRequestId(requestId, 'assistant');
-    if (!message) message = addMessage({ type: 'assistant', content: '', rawContent: '', requestId });
-    if (chunk) {
-      message.rawContent = (message.rawContent || '') + chunk;
-      message.content = message.rawContent;
-    }
-    if (done) {
-      message.isComplete = true;
-      endStream();
-    }
+    applyAssistantChunk(event);
+    if (done) endStream();
   }
 
   function applyMessage(event) {
@@ -214,6 +207,8 @@ function createTui(options = {}) {
   }
 
   async function submit(text) {
+    if (stopped) return;
+    if (bootPromise) { try { await bootPromise; } catch { /* boot reports its own errors */ } }
     if (stopped) return;
     const parsed = classify(text);
     if (parsed.kind === 'empty') return;

@@ -32,4 +32,4 @@ function formatModelName(modelId) {
   return parts.length > 1 ? `${baseName} (${parts[1]})` : baseName;
 }
 
-export { DEFAULT_MODELS, getDefaultModels, formatModelName };
+export { getDefaultModels, formatModelName };

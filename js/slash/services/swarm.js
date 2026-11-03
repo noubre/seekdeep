@@ -68,7 +68,4 @@ function createSwarmService(client = rpcClient) {
     }
   });
 }
-
-const swarmService = createSwarmService();
-
-export { createSwarmService, swarmService };
+export { createSwarmService };

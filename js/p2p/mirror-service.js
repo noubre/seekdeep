@@ -1,32 +1,27 @@
 import MirrorDrive from 'mirror-drive';
 import b4a from 'b4a';
-import crypto from 'hypercore-crypto';
+import {
+  positiveInteger,
+  isPrintableReference,
+  createIdFactory,
+  allocateId
+} from './service-kit.js';
 
-const CONTROL_PATTERN = /[\u0000-\u001f\u007f]/;
-const MAX_REFERENCE_CHARS = 160;
 const MAX_PREFIX_BYTES = 512;
 const MAX_JOBS = 32;
 const MAX_PATHS = 25;
 const MAX_DIFFS = 1000;
 const MAX_DURATION_MS = 10000;
 const MAX_BYTES_OBSERVED = 64 * 1024 * 1024;
-const MAX_ID_ATTEMPTS = 8;
 const STATUSES = new Set(['queued', 'running', 'stopping', 'completed', 'capped', 'failed', 'stopped']);
 
-function positiveInteger(value, label) {
-  if (!Number.isSafeInteger(value) || value < 1) throw new TypeError(`${label} must be a positive integer`);
-  return value;
-}
-
 function normalizeReference(value, label) {
-  if (typeof value !== 'string' || !value || value.length > MAX_REFERENCE_CHARS || CONTROL_PATTERN.test(value)) {
-    throw new TypeError(`${label} must be a non-empty printable string`);
-  }
+  if (!isPrintableReference(value)) throw new TypeError(`${label} must be a non-empty printable string`);
   return value;
 }
 
 function normalizePrefix(value = '/') {
-  if (typeof value !== 'string' || !value || value.includes('\\') || CONTROL_PATTERN.test(value)) {
+  if (!isPrintableReference(value, { maxChars: Number.POSITIVE_INFINITY }) || value.includes('\\')) {
     throw new TypeError('Mirror prefix contains invalid characters');
   }
   const prefix = value.startsWith('/') ? value : `/${value}`;
@@ -52,10 +47,6 @@ function normalizeOptions(value = {}) {
   return { dryRun: true, prune: false, prefix: normalizePrefix(value.prefix ?? '/') };
 }
 
-function defaultIdFactory() {
-  return `mirror-${b4a.toString(crypto.randomBytes(12), 'hex')}`;
-}
-
 function safeBytes(value) {
   return Number.isSafeInteger(value) && value >= 0 ? value : 0;
 }
@@ -75,7 +66,7 @@ function createMirrorService(options = {}) {
   const localdriveService = options.localdriveService;
   const driveService = options.driveService;
   const MirrorDriveConstructor = options.MirrorDrive || MirrorDrive;
-  const idFactory = options.idFactory || defaultIdFactory;
+  const idFactory = options.idFactory || createIdFactory('mirror');
   const maxJobs = positiveInteger(options.maxJobs ?? MAX_JOBS, 'maxJobs');
   const maxPaths = positiveInteger(options.maxPaths ?? MAX_PATHS, 'maxPaths');
   const maxDiffs = positiveInteger(options.maxDiffs ?? MAX_DIFFS, 'maxDiffs');
@@ -110,15 +101,13 @@ function createMirrorService(options = {}) {
     };
   }
 
-  function allocateId() {
-    for (let attempt = 0; attempt < MAX_ID_ATTEMPTS; attempt += 1) {
-      const id = idFactory();
-      if (typeof id !== 'string' || !id || id.length > MAX_REFERENCE_CHARS || CONTROL_PATTERN.test(id)) {
-        throw new TypeError('Mirror idFactory returned an invalid id');
-      }
-      if (!jobs.has(id)) return id;
-    }
-    throw new Error('Unable to allocate a unique Mirror id');
+  function allocateJobId() {
+    return allocateId({
+      idFactory,
+      isTaken: (candidate) => jobs.has(candidate),
+      invalidMessage: 'Mirror idFactory returned an invalid id',
+      exhaustedMessage: 'Unable to allocate a unique Mirror id'
+    });
   }
 
   function recordDiff(job, diff) {
@@ -246,7 +235,7 @@ function createMirrorService(options = {}) {
         throw new Error('Mirror destination must be open and writable');
       }
       const job = {
-        id: allocateId(),
+        id: allocateJobId(),
         localId: normalizeReference(source.id, 'Localdrive id'),
         driveId: normalizeReference(destination.id, 'Drive id'),
         status: 'queued',
@@ -316,6 +305,5 @@ export {
   MAX_DIFFS,
   MAX_DURATION_MS,
   MAX_BYTES_OBSERVED,
-  normalizePrefix,
   createMirrorService
 };

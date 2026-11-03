@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' http://localhost:11434 http://localhost:1234">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' http://localhost:11434 http://localhost:1234">
   <link rel="stylesheet" href="./css/app.css">
   <!-- Marked.js for Markdown parsing -->
   <script src="./lib/marked.min.js"></script>
@@ -31,9 +31,9 @@
     <div class="sidebar-footer">
       <div id="storage-info">
         <div class="storage-stats">
-          <span>0 sessions</span>
+          <span id="storage-session-count">0 sessions</span>
           <span>•</span>
-          <span>0 KB used</span>
+          <span id="storage-size">0 KB used</span>
         </div>
       </div>
     </div>
@@ -81,10 +81,6 @@
   <div id="chat-container">
     <div id="active-users">
       <!-- Active users will be added here dynamically -->
-      <div class="user-chip">
-        <span class="status-indicator"></span>
-        You
-      </div>
     </div>
     <div id="chat-messages" role="log" aria-live="polite" aria-relevant="additions text">
       <!-- Chat messages will be added here dynamically -->

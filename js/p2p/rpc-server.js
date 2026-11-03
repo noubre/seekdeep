@@ -1,58 +1,17 @@
 import b4a from 'b4a';
-
-const DEFAULT_MAX_MESSAGE_BYTES = 128 * 1024;
-const DEFAULT_MAX_AGGREGATE_BYTES = 512 * 1024;
-const DEFAULT_MAX_QUEUED_REQUESTS = 128;
-const MAX_ID_LENGTH = 64;
-const MIN_MESSAGE_BYTES = 128;
-const EVENT_PATTERN = /^[a-z][a-z0-9.-]{0,63}$/;
-
-function isPlainObject(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
-}
-
-function assertPlainDataObject(value, allowedKeys, label = 'RPC params') {
-  if (!isPlainObject(value)) throw new TypeError(`${label} must be a plain object`);
-  const result = {};
-  for (const key of Reflect.ownKeys(value)) {
-    if (typeof key !== 'string' || !allowedKeys.includes(key)) throw new TypeError(`${label} contains unsupported field: ${String(key)}`);
-    const descriptor = Object.getOwnPropertyDescriptor(value, key);
-    if (!descriptor || !Object.hasOwn(descriptor, 'value') || descriptor.get || descriptor.set || !descriptor.enumerable) {
-      throw new TypeError(`${label} fields must be enumerable data properties`);
-    }
-    result[key] = descriptor.value;
-  }
-  return result;
-}
-
-function assertJsonData(value, ancestors = new Set()) {
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') return;
-  if (typeof value === 'number' && Number.isFinite(value)) return;
-  if (typeof value !== 'object' || ancestors.has(value)) throw new TypeError('RPC payload must contain only JSON data');
-  const isArray = Array.isArray(value);
-  const prototype = Object.getPrototypeOf(value);
-  if ((isArray && prototype !== Array.prototype) || (!isArray && prototype !== Object.prototype && prototype !== null)) {
-    throw new TypeError('RPC payload must contain only plain JSON data');
-  }
-  ancestors.add(value);
-  try {
-    const keys = Reflect.ownKeys(value);
-    if (isArray && keys.length !== value.length + 1) throw new TypeError('RPC arrays must not be sparse or have extra fields');
-    for (const key of keys) {
-      if (typeof key !== 'string' || key === 'toJSON') throw new TypeError('RPC payload contains an unsupported field');
-      if (isArray && key === 'length') continue;
-      const descriptor = Object.getOwnPropertyDescriptor(value, key);
-      if (!descriptor || !Object.hasOwn(descriptor, 'value') || descriptor.get || descriptor.set || !descriptor.enumerable) {
-        throw new TypeError('RPC payload fields must be enumerable data properties');
-      }
-      assertJsonData(descriptor.value, ancestors);
-    }
-  } finally {
-    ancestors.delete(value);
-  }
-}
+import {
+  DEFAULT_MAX_AGGREGATE_BYTES,
+  DEFAULT_MAX_MESSAGE_BYTES,
+  DEFAULT_MAX_QUEUED_REQUESTS,
+  EVENT_PATTERN,
+  MAX_ID_LENGTH,
+  MIN_MESSAGE_BYTES,
+  assertJsonData,
+  assertPlainDataObject,
+  hasSafeErrorCode,
+  isPlainObject
+} from './rpc-codec.js';
+import { RPC_METHOD_NAMES } from './rpc-methods.js';
 
 function requiredString(values, key) {
   if (typeof values[key] !== 'string' || !values[key]) throw new TypeError(`${key} must be a non-empty string`);
@@ -74,123 +33,215 @@ function booleanValue(values, key) {
   return values[key];
 }
 
-function localdriveDefinition(operation, validate, invoke) {
+/**
+ * Wrap one method so any service failure becomes a coded, message-only payload
+ * the renderer client is allowed to forward (`rpc-codec.js`'s allowlist).
+ * `label` is derived from the code prefix: `LOCALDRIVE` -> `Localdrive`.
+ */
+function codedDefinition(prefix, operation, validate, invoke) {
   return {
     validate,
     async invoke(...args) {
       try {
         return await invoke(...args);
       } catch {
-        const safe = new Error(`Localdrive ${operation} failed`);
-        safe.code = `LOCALDRIVE_${operation.toUpperCase()}_FAILED`;
+        const label = prefix.charAt(0) + prefix.slice(1).toLowerCase();
+        const safe = new Error(`${label} ${operation} failed`);
+        safe.code = `${prefix}_${operation.toUpperCase()}_FAILED`;
         throw safe;
       }
     }
   };
 }
 
-function mirrorDefinition(operation, validate, invoke) {
+/**
+ * Build one method definition from its parameter spec.
+ *
+ * - `required`/`optional` list the accepted keys in argument order; each is
+ *   validated as a non-empty string unless `validators[key]` overrides the rule.
+ * - `asParams` hands the method a single params object instead of positional
+ *   arguments (the chat methods take one object).
+ * - `validate` replaces the generated validation for shapes that do not fit it.
+ */
+function defineRpcMethod({ required = [], optional = [], validators = {}, asParams = false, validate, invoke }) {
+  if (typeof invoke !== 'function') throw new TypeError('RPC method definitions require an invoke function');
+  if (validate) return { validate, invoke };
+  const keys = [...required, ...optional];
+  const rule = (key, fallback) => validators[key] || fallback;
   return {
-    validate,
-    async invoke(...args) {
-      try {
-        return await invoke(...args);
-      } catch {
-        const safe = new Error(`Mirror ${operation} failed`);
-        safe.code = `MIRROR_${operation.toUpperCase()}_FAILED`;
-        throw safe;
+    validate(params) {
+      const p = assertPlainDataObject(params, keys);
+      if (asParams) {
+        const args = {};
+        for (const key of required) args[key] = rule(key, requiredString)(p, key);
+        for (const key of optional) args[key] = rule(key, optionalString)(p, key);
+        return [args];
       }
-    }
+      const args = required.map((key) => rule(key, requiredString)(p, key));
+      for (const key of optional) {
+        if (p[key] !== undefined) args.push(rule(key, requiredString)(p, key));
+      }
+      return args;
+    },
+    invoke
   };
+}
+
+function buildMethods(specs, codePrefix = null) {
+  const table = {};
+  for (const [name, spec] of Object.entries(specs)) {
+    const definition = defineRpcMethod(spec);
+    table[name] = codePrefix
+      ? codedDefinition(codePrefix, name.slice(name.indexOf('.') + 1), definition.validate, definition.invoke)
+      : definition;
+  }
+  return Object.freeze(table);
+}
+
+/**
+ * Method specs per service group. Building a group's table never touches the
+ * service, so the drift check below enumerates every name any factory can
+ * produce without a second hand-maintained list.
+ */
+const METHOD_SPECS = Object.freeze({
+  drive: (service) => ({
+    'drive.create': { required: ['name'], invoke: (name) => service.create(name) },
+    'drive.open': { required: ['key'], optional: ['name'], invoke: (key, name) => service.open(key, name) },
+    'drive.list': { invoke: () => service.list() },
+    'drive.status': { required: ['ref'], invoke: (ref) => service.status(ref) },
+    'drive.put': { required: ['ref', 'path', 'content'], validators: { content: stringValue }, invoke: (ref, path, content) => service.put(ref, path, content) },
+    'drive.get': { required: ['ref', 'path'], invoke: (ref, path) => service.get(ref, path) },
+    'drive.files': { required: ['ref'], optional: ['prefix'], invoke: (ref, prefix) => service.files(ref, prefix) },
+    'drive.del': { required: ['ref', 'path'], invoke: (ref, path) => service.del(ref, path) },
+    'drive.close': { required: ['ref'], invoke: (ref) => service.closeDrive(ref) }
+  }),
+  localdrive: (service) => ({
+    'localdrive.add': { required: ['name', 'root', 'writable'], validators: { writable: booleanValue }, invoke: (name, root, writable) => service.add(name, root, writable) },
+    'localdrive.list': { invoke: () => service.list() },
+    'localdrive.status': { required: ['ref'], invoke: (ref) => service.status(ref) },
+    'localdrive.files': { required: ['ref'], optional: ['prefix'], invoke: (ref, prefix) => service.files(ref, prefix) },
+    'localdrive.get': { required: ['ref', 'path'], invoke: (ref, path) => service.get(ref, path) },
+    'localdrive.put': { required: ['ref', 'path', 'content'], validators: { content: stringValue }, invoke: (ref, path, content) => service.put(ref, path, content) },
+    'localdrive.remove': { required: ['ref'], invoke: (ref) => service.remove(ref) }
+  }),
+  mirror: (service) => ({
+    'mirror.start': {
+      validate(params) {
+        const p = assertPlainDataObject(params, ['localRef', 'driveRef', 'dryRun', 'prune', 'prefix']);
+        return [requiredString(p, 'localRef'), requiredString(p, 'driveRef'), {
+          dryRun: booleanValue(p, 'dryRun'),
+          prune: booleanValue(p, 'prune'),
+          prefix: requiredString(p, 'prefix')
+        }];
+      },
+      invoke: (localRef, driveRef, options) => service.start(localRef, driveRef, options)
+    },
+    'mirror.status': { optional: ['id'], invoke: (id) => service.status(id) },
+    'mirror.stop': { required: ['id'], invoke: (id) => service.stop(id) }
+  }),
+  beam: (service) => ({
+    'beam.create': { required: ['name'], invoke: (name) => service.create(name) },
+    'beam.join': { required: ['name', 'key'], invoke: (name, key) => service.join(name, key) },
+    'beam.list': { invoke: () => service.list() },
+    'beam.status': { required: ['ref'], invoke: (ref) => service.status(ref) },
+    'beam.send': { required: ['ref', 'content'], validators: { content: stringValue }, invoke: (ref, content) => service.send(ref, content) },
+    'beam.receive': { required: ['ref'], invoke: (ref) => service.receive(ref) },
+    'beam.close': { required: ['ref'], invoke: (ref) => service.closeBeam(ref) }
+  }),
+  chat: (service) => {
+    const call = (name) => (params) => service.methods[name](params);
+    return {
+      'chat.status': { asParams: true, invoke: call('chat.status') },
+      'chat.create': { optional: ['name'], asParams: true, invoke: call('chat.create') },
+      'chat.join': { required: ['topic'], asParams: true, invoke: call('chat.join') },
+      'chat.leave': { asParams: true, invoke: call('chat.leave') },
+      'chat.peers': { asParams: true, invoke: call('chat.peers') },
+      'chat.send': { required: ['prompt', 'model'], asParams: true, invoke: call('chat.send') },
+      'chat.setMode': { required: ['collaborative'], validators: { collaborative: booleanValue }, asParams: true, invoke: call('chat.setMode') },
+      'chat.refreshModels': { asParams: true, invoke: call('chat.refreshModels') },
+      'chat.setProvider': { required: ['provider'], asParams: true, invoke: call('chat.setProvider') }
+    };
+  },
+  harness: (harness) => ({
+    'slash.list': { invoke: () => harness.runtime.list() },
+    'slash.dispatch': { required: ['text'], invoke: async (text) => ({ handled: await harness.dispatch(text) }) }
+  })
+});
+
+const METHOD_PROBE = Object.freeze({ methods: Object.freeze({}) });
+
+/** Every method name any factory can produce, enumerated from its spec table. */
+const KNOWN_METHOD_NAMES = Object.freeze(
+  Object.values(METHOD_SPECS).flatMap((buildSpecs) => Object.keys(buildSpecs(METHOD_PROBE)))
+);
+
+{
+  const known = new Set(KNOWN_METHOD_NAMES);
+  const listed = new Set(RPC_METHOD_NAMES);
+  const missing = RPC_METHOD_NAMES.filter((name) => !known.has(name));
+  const unexpected = KNOWN_METHOD_NAMES.filter((name) => !listed.has(name));
+  if (missing.length || unexpected.length || known.size !== KNOWN_METHOD_NAMES.length) {
+    const duplicates = KNOWN_METHOD_NAMES.filter((name, index) => KNOWN_METHOD_NAMES.indexOf(name) !== index);
+    throw new Error(
+      `RPC method list drift: missing [${missing.join(', ')}]; unexpected [${unexpected.join(', ')}]; duplicate [${duplicates.join(', ')}]`
+    );
+  }
 }
 
 function createDriveRpcMethods(service) {
   if (!service || typeof service !== 'object') throw new TypeError('Drive service is required');
-  return Object.freeze({
-    'drive.create': { validate(params) { const p = assertPlainDataObject(params, ['name']); return [requiredString(p, 'name')]; }, invoke: (name) => service.create(name) },
-    'drive.open': { validate(params) { const p = assertPlainDataObject(params, ['key', 'name']); return [requiredString(p, 'key'), optionalString(p, 'name')]; }, invoke: (key, name) => service.open(key, name) },
-    'drive.list': { validate(params) { assertPlainDataObject(params, []); return []; }, invoke: () => service.list() },
-    'drive.status': { validate(params) { const p = assertPlainDataObject(params, ['ref']); return [requiredString(p, 'ref')]; }, invoke: (ref) => service.status(ref) },
-    'drive.put': { validate(params) { const p = assertPlainDataObject(params, ['ref', 'path', 'content']); return [requiredString(p, 'ref'), requiredString(p, 'path'), stringValue(p, 'content')]; }, invoke: (ref, path, content) => service.put(ref, path, content) },
-    'drive.get': { validate(params) { const p = assertPlainDataObject(params, ['ref', 'path']); return [requiredString(p, 'ref'), requiredString(p, 'path')]; }, invoke: (ref, path) => service.get(ref, path) },
-    'drive.files': { validate(params) { const p = assertPlainDataObject(params, ['ref', 'prefix']); return [requiredString(p, 'ref'), optionalString(p, 'prefix')]; }, invoke: (ref, prefix) => service.files(ref, prefix) },
-    'drive.del': { validate(params) { const p = assertPlainDataObject(params, ['ref', 'path']); return [requiredString(p, 'ref'), requiredString(p, 'path')]; }, invoke: (ref, path) => service.del(ref, path) },
-    'drive.close': { validate(params) { const p = assertPlainDataObject(params, ['ref']); return [requiredString(p, 'ref')]; }, invoke: (ref) => service.closeDrive(ref) }
-  });
+  return buildMethods(METHOD_SPECS.drive(service));
 }
 
 function createLocaldriveRpcMethods(service) {
   if (!service || typeof service !== 'object') throw new TypeError('Localdrive service is required');
-  return Object.freeze({
-    'localdrive.add': localdriveDefinition('add', (params) => { const p = assertPlainDataObject(params, ['name', 'root', 'writable']); return [requiredString(p, 'name'), requiredString(p, 'root'), booleanValue(p, 'writable')]; }, (name, root, writable) => service.add(name, root, writable)),
-    'localdrive.list': localdriveDefinition('list', (params) => { assertPlainDataObject(params, []); return []; }, () => service.list()),
-    'localdrive.status': localdriveDefinition('status', (params) => { const p = assertPlainDataObject(params, ['ref']); return [requiredString(p, 'ref')]; }, (ref) => service.status(ref)),
-    'localdrive.files': localdriveDefinition('files', (params) => { const p = assertPlainDataObject(params, ['ref', 'prefix']); return [requiredString(p, 'ref'), optionalString(p, 'prefix')]; }, (ref, prefix) => service.files(ref, prefix)),
-    'localdrive.get': localdriveDefinition('get', (params) => { const p = assertPlainDataObject(params, ['ref', 'path']); return [requiredString(p, 'ref'), requiredString(p, 'path')]; }, (ref, path) => service.get(ref, path)),
-    'localdrive.put': localdriveDefinition('put', (params) => { const p = assertPlainDataObject(params, ['ref', 'path', 'content']); return [requiredString(p, 'ref'), requiredString(p, 'path'), stringValue(p, 'content')]; }, (ref, path, content) => service.put(ref, path, content)),
-    'localdrive.remove': localdriveDefinition('remove', (params) => { const p = assertPlainDataObject(params, ['ref']); return [requiredString(p, 'ref')]; }, (ref) => service.remove(ref))
-  });
+  return buildMethods(METHOD_SPECS.localdrive(service), 'LOCALDRIVE');
 }
 
 function createMirrorRpcMethods(service) {
   if (!service || typeof service !== 'object') throw new TypeError('Mirror service is required');
-  return Object.freeze({
-    'mirror.start': mirrorDefinition('start', (params) => {
-      const p = assertPlainDataObject(params, ['localRef', 'driveRef', 'dryRun', 'prune', 'prefix']);
-      return [requiredString(p, 'localRef'), requiredString(p, 'driveRef'), {
-        dryRun: booleanValue(p, 'dryRun'),
-        prune: booleanValue(p, 'prune'),
-        prefix: requiredString(p, 'prefix')
-      }];
-    }, (localRef, driveRef, options) => service.start(localRef, driveRef, options)),
-    'mirror.status': mirrorDefinition('status', (params) => {
-      const p = assertPlainDataObject(params, ['id']);
-      return [optionalString(p, 'id')];
-    }, (id) => service.status(id)),
-    'mirror.stop': mirrorDefinition('stop', (params) => {
-      const p = assertPlainDataObject(params, ['id']);
-      return [requiredString(p, 'id')];
-    }, (id) => service.stop(id))
-  });
+  return buildMethods(METHOD_SPECS.mirror(service), 'MIRROR');
 }
 
 function createBeamRpcMethods(service) {
   if (!service || typeof service !== 'object') throw new TypeError('Beam service is required');
-  return Object.freeze({
-    'beam.create': { validate(params) { const p = assertPlainDataObject(params, ['name']); return [requiredString(p, 'name')]; }, invoke: (name) => service.create(name) },
-    'beam.join': { validate(params) { const p = assertPlainDataObject(params, ['name', 'key']); return [requiredString(p, 'name'), requiredString(p, 'key')]; }, invoke: (name, key) => service.join(name, key) },
-    'beam.list': { validate(params) { assertPlainDataObject(params, []); return []; }, invoke: () => service.list() },
-    'beam.status': { validate(params) { const p = assertPlainDataObject(params, ['ref']); return [requiredString(p, 'ref')]; }, invoke: (ref) => service.status(ref) },
-    'beam.send': { validate(params) { const p = assertPlainDataObject(params, ['ref', 'content']); return [requiredString(p, 'ref'), stringValue(p, 'content')]; }, invoke: (ref, content) => service.send(ref, content) },
-    'beam.receive': { validate(params) { const p = assertPlainDataObject(params, ['ref']); return [requiredString(p, 'ref')]; }, invoke: (ref) => service.receive(ref) },
-    'beam.close': { validate(params) { const p = assertPlainDataObject(params, ['ref']); return [requiredString(p, 'ref')]; }, invoke: (ref) => service.closeBeam(ref) }
-  });
+  return buildMethods(METHOD_SPECS.beam(service));
 }
 
 function createChatRpcMethods(service) {
   if (!service || typeof service.methods !== 'object' || !service.methods) throw new TypeError('Chat service is required');
-  const call = (name) => (params) => service.methods[name](params);
-  return Object.freeze({
-    'chat.status': { validate(params) { assertPlainDataObject(params, []); return [{}]; }, invoke: call('chat.status') },
-    'chat.create': { validate(params) { const p = assertPlainDataObject(params, ['name']); return [{ name: optionalString(p, 'name') }]; }, invoke: call('chat.create') },
-    'chat.join': { validate(params) { const p = assertPlainDataObject(params, ['topic']); return [{ topic: requiredString(p, 'topic') }]; }, invoke: call('chat.join') },
-    'chat.leave': { validate(params) { assertPlainDataObject(params, []); return [{}]; }, invoke: call('chat.leave') },
-    'chat.peers': { validate(params) { assertPlainDataObject(params, []); return [{}]; }, invoke: call('chat.peers') },
-    'chat.send': { validate(params) { const p = assertPlainDataObject(params, ['prompt', 'model']); return [{ prompt: requiredString(p, 'prompt'), model: requiredString(p, 'model') }]; }, invoke: call('chat.send') },
-    'chat.setMode': { validate(params) { const p = assertPlainDataObject(params, ['collaborative']); return [{ collaborative: booleanValue(p, 'collaborative') }]; }, invoke: call('chat.setMode') },
-    'chat.refreshModels': { validate(params) { assertPlainDataObject(params, []); return [{}]; }, invoke: call('chat.refreshModels') },
-    'chat.setProvider': { validate(params) { const p = assertPlainDataObject(params, ['provider']); return [{ provider: requiredString(p, 'provider') }]; }, invoke: call('chat.setProvider') }
-  });
+  return buildMethods(METHOD_SPECS.chat(service));
+}
+
+function createHarnessRpcMethods(harness) {
+  if (!harness || typeof harness.dispatch !== 'function' || typeof harness.runtime?.list !== 'function') {
+    throw new TypeError('Harness is required');
+  }
+  return buildMethods(METHOD_SPECS.harness(harness));
+}
+
+/**
+ * Look up, validate, and invoke one method. Shared by the pipe server and the
+ * in-process harness client so both validate identically.
+ */
+async function dispatchMethod(methods, name, params) {
+  const definition = Object.hasOwn(methods, name) ? methods[name] : null;
+  if (!definition || typeof definition.validate !== 'function' || typeof definition.invoke !== 'function') {
+    throw new Error(`RPC method is not allowed: ${String(name)}`);
+  }
+  const args = definition.validate(params ?? {});
+  return definition.invoke(...args);
 }
 
 function createResourceRpcMethods(services) {
   if (!services || typeof services !== 'object' || Array.isArray(services)) throw new TypeError('Resource services are required');
   return Object.freeze({
-    ...createDriveRpcMethods(services.drive),
-    ...createLocaldriveRpcMethods(services.localdrive),
+    ...(services.drive ? createDriveRpcMethods(services.drive) : {}),
+    ...(services.localdrive ? createLocaldriveRpcMethods(services.localdrive) : {}),
     ...(services.mirror ? createMirrorRpcMethods(services.mirror) : {}),
     ...(services.beam ? createBeamRpcMethods(services.beam) : {}),
-    ...(services.chat ? createChatRpcMethods(services.chat) : {})
+    ...(services.chat ? createChatRpcMethods(services.chat) : {}),
+    ...(services.harness ? createHarnessRpcMethods(services.harness) : {})
   });
 }
 
@@ -244,6 +295,7 @@ function createJsonRpcServer(pipe, methods, options = {}) {
     const frame = b4a.from(`${JSON.stringify(message)}\n`);
     if (frame.byteLength > maxMessageBytes) {
       const fallback = b4a.from(`${JSON.stringify({ id: message.id ?? null, ok: false, error: 'RPC response is too large' })}\n`);
+      // Oversized frames are dropped, never rejected (see `notify`).
       if (fallback.byteLength > maxMessageBytes) return Promise.resolve();
       return write(fallback);
     }
@@ -255,16 +307,11 @@ function createJsonRpcServer(pipe, methods, options = {}) {
     try {
       const request = validateRequest(JSON.parse(b4a.toString(line)));
       id = request.id;
-      const definition = Object.hasOwn(methods, request.method) ? methods[request.method] : null;
-      if (!definition || typeof definition.validate !== 'function' || typeof definition.invoke !== 'function') {
-        throw new Error(`RPC method is not allowed: ${request.method}`);
-      }
-      const args = definition.validate(request.params);
-      const result = await definition.invoke(...args);
+      const result = await dispatchMethod(methods, request.method, request.params);
       assertJsonData(result);
       await send({ id, ok: true, result });
     } catch (error) {
-      const safe = error instanceof Error && typeof error.code === 'string' && (error.code.startsWith('LOCALDRIVE_') || error.code.startsWith('MIRROR_'))
+      const safe = error instanceof Error && hasSafeErrorCode(error.code)
         ? { code: error.code.slice(0, 128), message: error.message.slice(0, 1024) }
         : (error instanceof Error ? error.message.slice(0, 1024) : 'RPC request failed');
       try { await send({ id, ok: false, error: safe }); } catch {}
@@ -318,7 +365,9 @@ function createJsonRpcServer(pipe, methods, options = {}) {
     assertJsonData(data);
     if (closed || transportClosed || pipe.destroyed) return Promise.resolve();
     const frame = b4a.from(`${JSON.stringify({ event, data })}\n`);
-    if (frame.byteLength > maxMessageBytes) return Promise.reject(new RangeError('RPC event is too large'));
+    // Oversized frames are dropped, never rejected: the peer has no reply
+    // channel for an event, and this matches `send()`'s silent drop.
+    if (frame.byteLength > maxMessageBytes) return Promise.resolve();
     return write(frame);
   }
 
@@ -344,13 +393,12 @@ export {
   DEFAULT_MAX_MESSAGE_BYTES,
   DEFAULT_MAX_QUEUED_REQUESTS,
   EVENT_PATTERN,
+  MAX_ID_LENGTH,
+  MIN_MESSAGE_BYTES,
   assertJsonData,
   assertPlainDataObject,
-  createDriveRpcMethods,
-  createLocaldriveRpcMethods,
-  createMirrorRpcMethods,
-  createBeamRpcMethods,
-  createChatRpcMethods,
+  createHarnessRpcMethods,
   createResourceRpcMethods,
-  createJsonRpcServer
+  createJsonRpcServer,
+  dispatchMethod
 };

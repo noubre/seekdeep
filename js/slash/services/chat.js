@@ -2,19 +2,19 @@
  * Chat slash service: exposes room lifecycle/status over the worker RPC,
  * mirroring the resource slash services.
  */
-import { rpcClient } from '../../p2p/rpc-client.js';
+import { createRpcFacade } from './facade.js';
 
-function createChatSlashService(client = rpcClient) {
-  if (!client || typeof client.request !== 'function') throw new TypeError('Chat RPC client is required');
-  return Object.freeze({
-    status: () => client.request('chat.status', {}),
-    peers: () => client.request('chat.peers', {}),
-    create: () => client.request('chat.create', {}),
-    join: (topic) => client.request('chat.join', { topic }),
-    leave: () => client.request('chat.leave', {})
+function createChatSlashService(client) {
+  return createRpcFacade({
+    client,
+    label: 'Chat',
+    methods: {
+      status: { rpc: 'chat.status', params: () => ({}) },
+      peers: { rpc: 'chat.peers', params: () => ({}) },
+      create: { rpc: 'chat.create', params: () => ({}) },
+      join: { rpc: 'chat.join', params: (topic) => ({ topic }) },
+      leave: { rpc: 'chat.leave', params: () => ({}) }
+    }
   });
 }
-
-const chatService = createChatSlashService();
-
-export { createChatSlashService, chatService };
+export { createChatSlashService };

@@ -4,6 +4,7 @@
  */
 import { listSessions, loadSession, deleteSession, searchSessions, getStorageStats } from '../session/storage.js';
 import { addMessage, clear } from '../messages/store.js';
+import { escapeHtml } from '../messages/formatting.js';
 
 // State
 let isHistoryBrowserOpen = false;
@@ -13,11 +14,12 @@ let currentSearchQuery = '';
  * Initialize the history browser
  */
 export function initializeHistoryBrowser() {
-  // Browser is created in HTML, just set up initial state
+  // Browser is created in HTML; its closed state lives in CSS. Re-assert the
+  // closed classes so a reused document cannot start with a stale open state.
   const sidebar = document.getElementById('history-sidebar');
-  if (sidebar) {
-    sidebar.style.transform = 'translateX(-100%)';
-  }
+  const overlay = document.getElementById('history-overlay');
+  if (sidebar) sidebar.classList.remove('open');
+  if (overlay) overlay.classList.remove('open');
 }
 
 /**
@@ -34,24 +36,19 @@ export function toggleHistoryBrowser() {
   
   isHistoryBrowserOpen = !isHistoryBrowserOpen;
   
+  sidebar.classList.toggle('open', isHistoryBrowserOpen);
+  overlay.classList.toggle('open', isHistoryBrowserOpen);
+
   if (isHistoryBrowserOpen) {
-    // Open sidebar
-    sidebar.style.transform = 'translateX(0)';
-    overlay.style.display = 'block';
-    
     // Render session list
     renderSessionList();
-  } else {
-    // Close sidebar
-    sidebar.style.transform = 'translateX(-100%)';
-    overlay.style.display = 'none';
   }
 }
 
 /**
  * Render the list of saved sessions
  */
-export function renderSessionList() {
+function renderSessionList() {
   const sessionList = document.getElementById('session-list');
   if (!sessionList) {
     console.error('[HistoryBrowser] Session list container not found');
@@ -159,7 +156,7 @@ function createSessionElement(session) {
  * Handle loading a session
  * @param {string} sessionId - The session ID to load
  */
-export async function handleSessionLoad(sessionId) {
+async function handleSessionLoad(sessionId) {
   // Confirm with user
   const confirmed = confirm('Load this session? This will replace your current chat.');
   
@@ -203,7 +200,7 @@ export async function handleSessionLoad(sessionId) {
  * Handle deleting a session
  * @param {string} sessionId - The session ID to delete
  */
-export function handleSessionDelete(sessionId) {
+function handleSessionDelete(sessionId) {
   // Confirm with user
   const confirmed = confirm('Delete this session? This cannot be undone.');
   
@@ -236,30 +233,11 @@ export function handleSessionSearch(query) {
  * Update storage information display
  */
 function updateStorageInfo() {
-  const storageInfo = document.getElementById('storage-info');
-  if (!storageInfo) {
-    return;
-  }
-  
   const stats = getStorageStats();
-  storageInfo.innerHTML = `
-    <div class="storage-stats">
-      <span>${stats.sessionCount} sessions</span>
-      <span>•</span>
-      <span>${stats.totalSizeKB} KB used</span>
-    </div>
-  `;
-}
-
-/**
- * Escape HTML to prevent XSS
- * @param {string} text - Text to escape
- * @returns {string} Escaped text
- */
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
+  const countEl = document.getElementById('storage-session-count');
+  const sizeEl = document.getElementById('storage-size');
+  if (countEl) countEl.textContent = `${stats.sessionCount} sessions`;
+  if (sizeEl) sizeEl.textContent = `${stats.totalSizeKB} KB used`;
 }
 
 /**
@@ -270,12 +248,3 @@ export function isOpen() {
   return isHistoryBrowserOpen;
 }
 
-export default {
-  initializeHistoryBrowser,
-  toggleHistoryBrowser,
-  renderSessionList,
-  handleSessionLoad,
-  handleSessionDelete,
-  handleSessionSearch,
-  isOpen
-};

@@ -1,11 +1,11 @@
+/**
+ * Slash command engine.
+ *
+ * The command set is no longer hardcoded: the harness builds a runtime from the
+ * command definitions contributed by the loaded plugins. This module only owns
+ * parsing/dispatch mechanics and the pure help formatters.
+ */
 import { isSlashTag, parseSlashTag } from './parser.js';
-import { createP2PHandler } from './tags/p2p.js';
-import { handleSwarm } from './tags/swarm.js';
-import { handleDHT } from './tags/dht.js';
-import { handleDrive } from './tags/drive.js';
-import { handleLocaldrive } from './tags/localdrive.js';
-import { handleMirror } from './tags/mirror.js';
-import { handleBeam } from './tags/beam.js';
 
 function freezeDefinition(definition) {
   const aliases = definition.aliases
@@ -18,74 +18,6 @@ function freezeDefinition(definition) {
     : undefined;
 
   return Object.freeze({ ...definition, aliases, aliasArguments });
-}
-
-const handleP2P = createP2PHandler(Object.freeze({
-  all: () => formatAllHelp(commandDefinitions),
-  command: (target) => formatCommandHelp(target, commandDefinitions)
-}));
-
-const commandDefinitions = Object.freeze([
-  {
-    name: 'p2p',
-    summary: 'Show local help for SeekDeep peer-to-peer commands.',
-    usage: '/p2p help [command]',
-    aliases: ['help'],
-    aliasArguments: { help: ['help'] },
-    handler: handleP2P
-  },
-  {
-    name: 'swarm',
-    summary: 'Inspect and manage peer discovery.',
-    usage: '/swarm [status|create|join <64hex>|leave|peers]',
-    handler: handleSwarm
-  },
-  {
-    name: 'dht',
-    summary: 'Inspect distributed hash table state.',
-    usage: '/dht [status|key|nodes]',
-    handler: handleDHT
-  },
-  {
-    name: 'drive',
-    summary: 'Manage shared Hyperdrive content.',
-    usage: '/drive <create|open|list|status|put|get|files|del|close> [arguments]',
-    handler: handleDrive
-  },
-  {
-    name: 'localdrive',
-    summary: 'Manage local filesystem drive mappings.',
-    usage: '/localdrive <add|remove|list|status|files|get|put> [arguments]',
-    handler: handleLocaldrive
-  },
-  {
-    name: 'mirror',
-    summary: 'Dry-run a one-shot Localdrive to Hyperdrive mirror.',
-    usage: '/mirror <start <localdrive> <drive> [--dry-run] [--prefix=/safe/path] [--no-prune]|status [id]|stop <id>>',
-    handler: handleMirror
-  },
-  {
-    name: 'beam',
-    summary: 'Host or join an ephemeral one-to-one beam.',
-    usage: '/beam <create <name>|join <name> <key>|list|status <id>|send <id> <text>|receive <id>|close <id>>',
-    handler: handleBeam
-  }
-].map(freezeDefinition));
-
-const slashRegistry = Object.freeze(commandDefinitions.map(({
-  handler: _handler,
-  aliasArguments: _aliasArguments,
-  ...entry
-}) => Object.freeze(entry)));
-
-const slashTagList = Object.freeze(commandDefinitions.map(({
-  handler,
-  aliasArguments: _aliasArguments,
-  ...entry
-}) => Object.freeze({ ...entry, implemented: typeof handler === 'function' })));
-
-function listSlashTags() {
-  return slashTagList;
 }
 
 function createCommandMap(definitions) {
@@ -103,7 +35,16 @@ function publicEntries(definitions) {
   return definitions.map(({ handler: _handler, aliasArguments: _aliasArguments, ...entry }) => entry);
 }
 
-function formatAllHelp(definitions = commandDefinitions) {
+function listedEntries(definitions) {
+  return definitions.map((definition) => {
+    const { handler, aliasArguments: _aliasArguments, aliases, ...entry } = definition;
+    const listed = { ...entry, implemented: typeof handler === 'function' };
+    if (aliases) listed.aliases = aliases;
+    return Object.freeze(listed);
+  });
+}
+
+function formatAllHelp(definitions) {
   const lines = publicEntries(definitions).map(({ name, summary, usage }) => (
     `/${name} — ${summary}\n  Usage: ${usage}`
   ));
@@ -115,7 +56,7 @@ function normalizeHelpTarget(target) {
   return String(target).trim().replace(/^\//, '').toLowerCase();
 }
 
-function formatCommandHelp(target, definitions = commandDefinitions) {
+function formatCommandHelp(target, definitions) {
   const requested = normalizeHelpTarget(target);
   const resolved = createCommandMap(definitions).get(requested);
 
@@ -273,15 +214,16 @@ function errorResult(error, command) {
 }
 
 /**
- * Test seam for dispatching against an injected command list. Production uses
- * dispatchSlashTag below so its frozen registry cannot be extended at runtime.
+ * Dispatch a composer value against an explicit command list. This is the
+ * engine behind `createSlashRuntime` and the direct test seam.
  */
-async function dispatchSlashTagWithCommands(text, ctx, services = {}, definitions = commandDefinitions) {
+async function dispatchSlashTagWithCommands(text, ctx, services = {}, definitions = []) {
   if (!isSlashTag(text)) return false;
 
   if (!ctx || typeof ctx.emitEphemeral !== 'function') {
     throw new TypeError('Slash dispatch requires ctx.emitEphemeral(content, metadata?)');
   }
+  if (!Array.isArray(definitions)) throw new TypeError('Slash dispatch requires a command definition array');
 
   let parsed;
   try {
@@ -319,12 +261,27 @@ async function dispatchSlashTagWithCommands(text, ctx, services = {}, definition
 }
 
 /**
- * Dispatch a composer value as a local-only slash command. Handlers receive
- * parsed input and explicit services, return data, and cannot emit output.
- * This function is the only slash boundary that calls ctx.emitEphemeral.
+ * Build an immutable slash runtime from a plugin's contributed definitions.
  */
-function dispatchSlashTag(text, ctx, services = {}) {
-  return dispatchSlashTagWithCommands(text, ctx, services, commandDefinitions);
+function createSlashRuntime(definitions) {
+  if (!Array.isArray(definitions)) throw new TypeError('Slash runtime requires a command definition array');
+  const frozen = Object.freeze(definitions.map(freezeDefinition));
+
+  return Object.freeze({
+    definitions: frozen,
+    list: () => Object.freeze(listedEntries(frozen)),
+    allHelp: () => formatAllHelp(frozen),
+    commandHelp: (target) => formatCommandHelp(target, frozen),
+    dispatch: (text, ctx, services) => dispatchSlashTagWithCommands(text, ctx, services, frozen)
+  });
 }
 
-export { slashRegistry, listSlashTags, dispatchSlashTag, dispatchSlashTagWithCommands };
+export {
+  createSlashRuntime,
+  freezeDefinition,
+  dispatchSlashTagWithCommands,
+  formatAllHelp,
+  formatCommandHelp,
+  createCommandMap,
+  publicEntries
+};

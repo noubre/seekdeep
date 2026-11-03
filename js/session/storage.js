@@ -199,16 +199,6 @@ export function listSessions() {
 }
 
 /**
- * Get metadata for a specific session
- * @param {string} sessionId - The session ID
- * @returns {Object|null} Session metadata or null if not found
- */
-export function getSessionMetadata(sessionId) {
-  const registry = getSessionsRegistry();
-  return registry.find(session => session.id === sessionId) || null;
-}
-
-/**
  * Import a session from a JSON file object
  * @param {Object} sessionData - The parsed session data from JSON
  * @param {string} customName - Optional custom name
@@ -315,7 +305,6 @@ export default {
   loadSession,
   deleteSession,
   listSessions,
-  getSessionMetadata,
   importSessionFromData,
   searchSessions,
   getStorageStats,

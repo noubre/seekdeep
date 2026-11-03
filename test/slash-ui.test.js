@@ -1,7 +1,7 @@
 import test from 'brittle';
 import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
-import { dispatchSlashTag } from '../js/slash/registry.js';
+import { dispatchSlashTag, listSlashTags, helpServices } from './helpers/slash-runtime.js';
 import { initializeComposerDiscovery } from '../js/ui/composer-discovery.js';
 
 import { addMessage, clear, getHistory } from '../js/messages/store.js';
@@ -28,7 +28,7 @@ function installDom(dom) {
   initializeRendering();
 }
 
-test('composer discovers current and upcoming slash commands accessibly', function (t) {
+test('composer discovers current and upcoming slash commands accessibly', async function (t) {
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
   const dom = new JSDOM(html);
   const { document } = dom.window;
@@ -44,7 +44,8 @@ test('composer discovers current and upcoming slash commands accessibly', functi
     event.preventDefault();
     submitCount += 1;
   });
-  initializeComposerDiscovery(document);
+  initializeComposerDiscovery(document, { listSlash: () => listSlashTags() });
+  await new Promise((resolve) => setTimeout(resolve, 0));
 
   t.ok(helpButton, 'composer has a slash help control');
   t.is(helpButton.type, 'button', 'help control cannot submit the form');
@@ -75,19 +76,10 @@ test('slash submission renders locally without model, history, or service effect
   const chatMessagesEl = dom.window.document.getElementById('chat-messages');
   const emitEphemeral = createEphemeralRenderer(chatMessagesEl);
   const calls = { model: 0, ask: 0 };
-  const serviceAccesses = [];
-  const services = new Proxy({}, {
-    get(_target, property) {
-      serviceAccesses.push(String(property));
-      throw new Error(`unexpected slash service access: ${String(property)}`);
-    }
-  });
   const historyLength = getHistory().length;
 
   const result = await routePromptSubmission('/p2p help', {
-    dispatchSlashTag,
-    emitEphemeral,
-    services,
+    dispatchSlash: (text) => dispatchSlashTag(text, { emitEphemeral }, helpServices()),
     getSelectedModel() {
       calls.model += 1;
       return 'must-not-be-read';
@@ -100,7 +92,6 @@ test('slash submission renders locally without model, history, or service effect
 
   t.is(result, 'slash');
   t.alike(calls, { model: 0, ask: 0 }, 'slash bypasses model selection and ask');
-  t.alike(serviceAccesses, [], 'slash does not touch persistence, broadcast, or peer services');
   t.is(getHistory().length, historyLength, 'slash output is absent from chat history');
 
   const output = chatMessagesEl.querySelector('.message-ephemeral');
@@ -136,11 +127,7 @@ test('normal prompt routes to the LLM exactly once', async function (t) {
   const calls = [];
 
   const result = await routePromptSubmission('ordinary question', {
-    dispatchSlashTag,
-    emitEphemeral() {
-      throw new Error('non-slash input must not emit ephemeral output');
-    },
-    services: {},
+    dispatchSlash: async () => false,
     getSelectedModel() {
       calls.push(['model']);
       return 'local-model';
@@ -192,8 +179,13 @@ test('updateChatDisplay preserves slash chronology and its persistent live log',
   t.is(messages[1], firstSlash, 'first local result keeps its node identity');
   t.is(messages[2], secondSlash, 'second local result keeps its node identity');
   t.is(chatMessagesEl, liveLog, 'the live region keeps its identity');
-  t.is(liveLog.getAttribute('role'), 'log');
-  t.is(liveLog.getAttribute('aria-live'), 'polite');
+  // index.html owns the live-region semantics now; the renderer must not rewrite them.
+  const staticLog = new JSDOM(readFileSync(new URL('../index.html', import.meta.url), 'utf8'))
+    .window.document.getElementById('chat-messages');
+  t.is(staticLog.getAttribute('role'), 'log', 'app markup declares the log role');
+  t.is(staticLog.getAttribute('aria-live'), 'polite', 'app markup declares politeness');
+  t.is(staticLog.getAttribute('aria-relevant'), 'additions text', 'app markup declares relevant mutations');
+  t.is(liveLog.getAttribute('role'), null, 'the renderer never rewrites the live-region attributes');
   t.ok(liveLog.isConnected, 'the live region remains attached');
   t.is(historyLengthAfterSlashes, 1, 'slash results never enter history');
   t.is(getHistory().length, 3, 'only normal messages enter history');

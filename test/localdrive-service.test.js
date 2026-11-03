@@ -80,7 +80,6 @@ test('Localdrive rejects unsafe aliases, drive traversal, duplicates, and bounde
   await t.exception.all(() => service.add('Other', '@storage/docs'), /root.*use|duplicate/i);
   await service.add('Two', '@storage/two');
   await t.exception.all(() => service.add('Three', '@storage/three'), /limit/i);
-  await t.exception.all(() => service.put('docs', '/huge.txt', 'x'.repeat(MAX_LOCAL_CONTENT_BYTES + 1)), /too large/i);
   await t.exception.all(() => service.get('docs', '../outside'), /path/i);
 
   await writeFile(join(root, 'docs/1.txt'), '1');

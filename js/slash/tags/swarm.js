@@ -1,11 +1,7 @@
+import { requireService } from './support.js';
+
 const TOPIC_PATTERN = /^[0-9a-f]{64}$/i;
 const NO_ARGUMENT_ACTIONS = new Set(['status', 'create', 'leave', 'peers']);
-
-function requireSwarmService(services) {
-  const service = services?.swarm;
-  if (!service) throw new Error('Swarm service is unavailable.');
-  return service;
-}
 
 function assertNoArguments(action, args) {
   if (args.length > 0) throw new Error(`/swarm ${action} does not accept arguments.`);
@@ -99,7 +95,7 @@ async function handleSwarm(parsed, services) {
     throw new Error(`Unknown /swarm action: ${requestedAction}. Use status, create, join, leave, or peers.`);
   }
 
-  const swarm = requireSwarmService(services);
+  const swarm = requireService(services, 'swarm', 'Swarm service is unavailable.');
   if (action === 'status') return statusResult(await swarm.status());
   if (action === 'peers') return peersResult(await swarm.peers());
   if (action === 'create') return lifecycleResult(action, await swarm.create());

@@ -30,7 +30,4 @@ function createDHTService(client = rpcClient) {
     }
   });
 }
-
-const dhtService = createDHTService();
-
-export { createDHTService, dhtService };
+export { createDHTService };

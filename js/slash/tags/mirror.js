@@ -1,5 +1,12 @@
-const CONTROL_PATTERN = /[\u0000-\u001f\u007f]/;
-const MAX_REFERENCE_CHARS = 160;
+import {
+  CONTROL_PATTERN,
+  byteLength,
+  requireService,
+  exactKeys,
+  metadata,
+  isPrintableReference
+} from './support.js';
+
 const MAX_PATHS = 25;
 const MAX_JOBS = 32;
 const DESCRIPTOR_KEYS = [
@@ -10,18 +17,8 @@ const COUNT_KEYS = ['diffs', 'files', 'add', 'change', 'remove', 'bytesObserved'
 const STATUSES = new Set(['queued', 'running', 'stopping', 'completed', 'capped', 'failed', 'stopped']);
 const LIMIT_REASONS = new Set(['maxDiffs', 'maxDurationMs', 'maxBytesObserved']);
 
-function byteLength(value) {
-  return new TextEncoder().encode(value).byteLength;
-}
-
-function requireService(services) {
-  const service = services?.mirror;
-  if (!service) throw new Error('Mirror service is unavailable.');
-  return service;
-}
-
 function assertReference(value, label) {
-  if (typeof value !== 'string' || !value || value.length > MAX_REFERENCE_CHARS || CONTROL_PATTERN.test(value)) {
+  if (!isPrintableReference(value)) {
     throw new Error(`${label} must be a non-empty printable string.`);
   }
 }
@@ -36,12 +33,6 @@ function normalizePrefix(value = '/') {
   }
   if (byteLength(prefix) > 512) throw new Error('Mirror prefix is too large.');
   return prefix;
-}
-
-function exactKeys(value, keys) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const actual = Reflect.ownKeys(value);
-  return actual.length === keys.length && actual.every((key) => typeof key === 'string' && keys.includes(key));
 }
 
 function safeDescriptor(value) {
@@ -86,10 +77,6 @@ function safeDescriptor(value) {
   };
 }
 
-function metadata(action, extra = {}) {
-  return { kind: 'slash-mirror', command: 'mirror', action, ...extra };
-}
-
 function summary(row) {
   const counts = row.counts;
   return [
@@ -127,39 +114,39 @@ async function handleMirror(parsed, services) {
       throw new Error('--dry-run and --no-prune must be boolean flags.');
     }
     const prefix = normalizePrefix(parsed.flags.prefix === undefined ? '/' : parsed.flags.prefix);
-    const mirror = requireService(services);
+    const mirror = requireService(services, 'mirror', 'Mirror service is unavailable.');
     if (typeof mirror.start !== 'function') throw new Error('Mirror service is unavailable.');
     const row = safeDescriptor(await mirror.start(args[0], args[1], { dryRun: true, prune: false, prefix }));
     return {
       content: `Started one-shot MirrorDrive dry run. No files will be changed or pruned.\n${summary(row)}`,
-      metadata: metadata(action, { descriptor: row })
+      metadata: metadata('slash-mirror', 'mirror', action, { descriptor: row })
     };
   }
 
   if (action === 'status') {
     if (args.length > 1) throw new Error('/mirror status expects zero or one job id.');
     if (args[0] !== undefined) assertReference(args[0], 'Mirror id');
-    const mirror = requireService(services);
+    const mirror = requireService(services, 'mirror', 'Mirror service is unavailable.');
     if (typeof mirror.status !== 'function') throw new Error('Mirror service is unavailable.');
     const result = await mirror.status(args[0]);
     if (args[0] !== undefined) {
       const row = safeDescriptor(result);
-      return { content: summary(row), metadata: metadata(action, { descriptor: row }) };
+      return { content: summary(row), metadata: metadata('slash-mirror', 'mirror', action, { descriptor: row }) };
     }
     if (!Array.isArray(result) || result.length > MAX_JOBS) throw new Error('Mirror service returned an invalid list.');
     const rows = result.map(safeDescriptor);
     return {
       content: rows.length ? `Mirror jobs (${rows.length}):\n${rows.map(summary).join('\n\n')}` : 'No Mirror jobs.',
-      metadata: metadata(action, { descriptors: rows })
+      metadata: metadata('slash-mirror', 'mirror', action, { descriptors: rows })
     };
   }
 
   if (args.length !== 1) throw new Error('/mirror stop expects one job id.');
   assertReference(args[0], 'Mirror id');
-  const mirror = requireService(services);
+  const mirror = requireService(services, 'mirror', 'Mirror service is unavailable.');
   if (typeof mirror.stop !== 'function') throw new Error('Mirror service is unavailable.');
   const row = safeDescriptor(await mirror.stop(args[0]));
-  return { content: `Stopped Mirror job.\n${summary(row)}`, metadata: metadata(action, { descriptor: row }) };
+  return { content: `Stopped Mirror job.\n${summary(row)}`, metadata: metadata('slash-mirror', 'mirror', action, { descriptor: row }) };
 }
 
 export { handleMirror };

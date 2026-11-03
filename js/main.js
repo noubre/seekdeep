@@ -10,19 +10,22 @@ import * as historyBrowser from './ui/history-browser.js';
 import { initializeChatClient } from './chat-client.js';
 import { clientState } from './session/client-state.js';
 import { initializeRendering } from './ui/rendering.js';
-import { addMessage, notify, findLastMessageByRequestId } from './messages/store.js';
+import { createInitialRoom } from './ui/startup.js';
+import { createEphemeralRenderer } from './ui/ephemeral.js';
+import { addMessage, notify } from './messages/store.js';
+import { applyAssistantChunk } from './messages/stream.js';
 
 function applyResponse(event) {
-  const { requestId, chunk, done } = event;
-  let message = findLastMessageByRequestId(requestId, 'assistant');
-  if (!message) {
-    message = addMessage({ type: 'assistant', content: '', rawContent: '', requestId });
+  applyAssistantChunk(event);
+  notify();
+}
+
+function applyBotEvent(event) {
+  if (event.kind === 'message') {
+    addMessage({ type: 'system', content: `Bot ${event.fromName || event.from || 'peer'}: ${event.text || ''}` });
+  } else if (event.kind === 'reply') {
+    addMessage({ type: 'system', content: `Bot reply: ${event.text || ''}` });
   }
-  if (chunk) {
-    message.rawContent = (message.rawContent || '') + chunk;
-    message.content = message.rawContent;
-  }
-  if (done) message.isComplete = true;
   notify();
 }
 
@@ -31,12 +34,22 @@ function initializeApp() {
 
   ui.initializeElements();
   ui.initializeCopyButton();
-  initializeComposerDiscovery();
   historyBrowser.initializeHistoryBrowser();
   initializeRendering();
 
   const chatClient = initializeChatClient();
   globalThis.seekdeep = { chatClient, clientState };
+
+  initializeComposerDiscovery(document, { listSlash: () => chatClient.listSlash() });
+
+  const emitEphemeral = createEphemeralRenderer(ui.chatMessagesEl);
+  chatClient.onHarnessEvent((event) => {
+    if (event.type === 'slash') {
+      emitEphemeral(event.content, event.metadata);
+    } else if (event.type === 'bot') {
+      applyBotEvent(event);
+    }
+  });
 
   chatClient.onEvent((event) => {
     clientState.applyEvent(event);
@@ -47,11 +60,15 @@ function initializeApp() {
     }
   });
 
-  events.setupEventListeners({ chatClient, clientState });
-
-  chatClient.api.create().catch((error) => {
-    console.warn('Failed to create chat session:', error.message);
+  // Wired before the room exists on purpose: submits await `roomReady` instead
+  // of racing `chat.send` ahead of `chat.join`.
+  const roomReady = createInitialRoom({
+    chatClient,
+    applyEvent: (event) => clientState.applyEvent(event),
+    reportError: (message) => addMessage({ type: 'system', content: message })
   });
+
+  events.setupEventListeners({ chatClient, clientState, roomReady });
 
   console.log('SeekDeep application initialized successfully');
 }

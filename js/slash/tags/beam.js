@@ -1,36 +1,27 @@
+import {
+  MAX_NAME_CHARS,
+  byteLength,
+  requireService,
+  exactKeys,
+  metadata,
+  isPrintableName,
+  isPrintableReference
+} from './support.js';
+
 const KEY_PATTERN = /^[a-z2-7]{52}$/;
-const CONTROL_PATTERN = /[\u0000-\u001f\u007f]/;
-const MAX_NAME_CHARS = 80;
-const MAX_REFERENCE_CHARS = 160;
 const MAX_MESSAGE_BYTES = 64 * 1024;
 const DESCRIPTOR_KEYS = ['id', 'name', 'status', 'connected', 'pending', 'sentMessages', 'sentBytes', 'receivedMessages', 'receivedBytes'];
 const STATUSES = new Set(['connecting', 'open', 'closed', 'error']);
 const ACTIONS = ['create', 'join', 'list', 'status', 'send', 'receive', 'close'];
 
-function byteLength(value) {
-  return new TextEncoder().encode(value).byteLength;
-}
-
-function requireService(services) {
-  const service = services?.beam;
-  if (!service) throw new Error('Beam service is unavailable.');
-  return service;
-}
-
-function exactKeys(value, keys) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const actual = Reflect.ownKeys(value);
-  return actual.length === keys.length && actual.every((key) => typeof key === 'string' && keys.includes(key));
-}
-
 function assertName(value) {
-  if (typeof value !== 'string' || !value.trim() || value.length > MAX_NAME_CHARS || CONTROL_PATTERN.test(value)) {
+  if (!isPrintableName(value)) {
     throw new Error(`Beam name must be 1-${MAX_NAME_CHARS} printable characters.`);
   }
 }
 
 function assertReference(value, label = 'Beam reference') {
-  if (typeof value !== 'string' || !value || value.length > MAX_REFERENCE_CHARS || CONTROL_PATTERN.test(value)) {
+  if (!isPrintableReference(value)) {
     throw new Error(`${label} must be a non-empty printable string.`);
   }
 }
@@ -89,10 +80,6 @@ function safeReceiveResult(value) {
   };
 }
 
-function metadata(action, extra = {}) {
-  return { kind: 'slash-beam', command: 'beam', action, ...extra };
-}
-
 function summary(row) {
   return [
     `${row.name} (${row.id}): ${row.status}${row.connected ? ', connected' : ''}`,
@@ -128,7 +115,7 @@ async function handleBeam(parsed, services) {
     assertReference(args[0]);
   }
 
-  const beam = requireService(services);
+  const beam = requireService(services, 'beam', 'Beam service is unavailable.');
   if (typeof beam[action] !== 'function') throw new Error('Beam service is unavailable.');
 
   if (action === 'create') {
@@ -138,7 +125,7 @@ async function handleBeam(parsed, services) {
     const key = assertKey(result.key);
     return {
       content: `Created ephemeral beam ${row.name} (${row.id}). Share this capability once:\n${key}`,
-      metadata: metadata(action, { descriptor: row })
+      metadata: metadata('slash-beam', 'beam', action, { descriptor: row })
     };
   }
 
@@ -148,35 +135,35 @@ async function handleBeam(parsed, services) {
     const rows = result.map(safeDescriptor);
     return {
       content: rows.length ? `Beams (${rows.length}):\n${rows.map(summary).join('\n\n')}` : 'No active beams.',
-      metadata: metadata(action, { descriptors: rows })
+      metadata: metadata('slash-beam', 'beam', action, { descriptors: rows })
     };
   }
 
   if (action === 'join') {
     const row = safeDescriptor(await beam.join(args[0], assertKey(args[1])));
-    return { content: `Joined beam ${row.name} (${row.id}).`, metadata: metadata(action, { descriptor: row }) };
+    return { content: `Joined beam ${row.name} (${row.id}).`, metadata: metadata('slash-beam', 'beam', action, { descriptor: row }) };
   }
 
   if (action === 'status') {
     const row = safeDescriptor(await beam.status(args[0]));
-    return { content: summary(row), metadata: metadata(action, { descriptor: row }) };
+    return { content: summary(row), metadata: metadata('slash-beam', 'beam', action, { descriptor: row }) };
   }
 
   if (action === 'send') {
     const result = safeSendResult(await beam.send(args[0], args.slice(1).join(' ')));
-    return { content: `Sent ${result.bytes} bytes to ${result.id}.`, metadata: metadata(action, { result }) };
+    return { content: `Sent ${result.bytes} bytes to ${result.id}.`, metadata: metadata('slash-beam', 'beam', action, { result }) };
   }
 
   if (action === 'receive') {
     const result = safeReceiveResult(await beam.receive(args[0]));
     return {
       content: result.messages.length ? `Received (${result.messages.length}):\n${result.messages.join('\n')}` : 'No pending messages.',
-      metadata: metadata(action, { result })
+      metadata: metadata('slash-beam', 'beam', action, { result })
     };
   }
 
   const row = safeDescriptor(await beam.close(args[0]));
-  return { content: `Closed beam ${row.name} (${row.id}).`, metadata: metadata(action, { descriptor: row }) };
+  return { content: `Closed beam ${row.name} (${row.id}).`, metadata: metadata('slash-beam', 'beam', action, { descriptor: row }) };
 }
 
 export { handleBeam };

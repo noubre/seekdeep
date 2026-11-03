@@ -32,7 +32,7 @@ A P2P-enabled desktop application that interfaces with multiple local LLM provid
 
 Before running SeekDeep, make sure you have:
 
-1. **Node.js** (v18 or later) and **npm** installed
+1. **Node.js** 22.23.4 or newer and **npm** installed (October 21, 2026 security releases: 22.23.4 / 24.22.1 / 26.12.1)
 2. **Pear Runtime** installed (from [Pears.com](https://pears.com)) or just run:
    ```bash
    npx pear
@@ -107,6 +107,133 @@ Before running SeekDeep, make sure you have:
    - **Provider Switching**: Switch between Ollama and LM Studio at runtime
    - **Model Sync**: When connected to peers, model lists sync from the host's active provider
 
+### Terminal UI (TUI)
+
+For a no-window, zero-dependency client, run the same worker backend in-process
+over an in-memory pipe and render it in the terminal:
+
+```bash
+npm run tui
+# or
+node tui.js
+```
+
+Flags (all optional, invalid values are ignored):
+
+| Flag | Effect |
+|------|--------|
+| `--storage=<abs path>` | Hyperdrive/Localdrive root (default `~/.seekdeep`, or `SEEKDEEP_STORAGE`) |
+| `--model=<name>` | Pre-select a model |
+| `--provider=ollama\|lmstudio` | Pre-select a provider |
+| `--topic=<64hex>` | Join that room instead of creating a new one |
+| `--harness-key=<64hex>` | Sync the plugin harness from a remote key |
+| `--no-color` | Disable ANSI color (also honours `NO_COLOR`) |
+| `--local-dht[=<port>]`, `--bootstrap=host:port` | Point Hyperswarm at a loopback/known DHT |
+| `--ollama-url=…`, `--lmstudio-url=…` | Override provider base URLs |
+
+TUI-local commands (these never leave the process):
+
+| Command | Effect |
+|---------|--------|
+| `/tui` | List the TUI-local commands |
+| `/status` | Print role, topic, peer count, provider, and model |
+| `/models` | List the provider's models |
+| `/model <name\|index>` | Select a model by name or 1-based index |
+| `/provider <name>` | Switch provider (`ollama` or `lmstudio`; host only) |
+| `/join <64hex topic>` | Join a room |
+| `/leave` | Leave the current room |
+| `/clear` | Clear the message store (and the screen on a TTY) |
+| `/quit`, `/exit` | Exit |
+
+Every other `/…` input (`/p2p`, `/swarm`, `/drive`, `/localdrive`, `/mirror`,
+`/beam`, `/harness`, `/bot`, …) is forwarded verbatim to the plugin harness, so
+the TUI exposes the full desktop command set. Plain text is sent to the host
+LLM once a model is selected (`/models` then `/model <name>`).
+
+Replies stream token by token; input is paused while a response generates, so
+keystrokes typed mid-stream are dropped.
+
+### Plugin Harness
+
+SeekDeep is a plugin-based harness. All slash commands run in the Bare worker, where
+plugins are discovered, loaded, and dispatched; the renderer only speaks two RPC calls
+(`slash.list`, `slash.dispatch`) plus the `harness.event` stream.
+
+Built-in plugins (in `plugins/`):
+
+| Plugin | Command | Purpose |
+| --- | --- | --- |
+| `p2p-core` | `/p2p`, `/swarm`, `/dht`, `/drive`, `/localdrive`, `/mirror`, `/beam` | The default peer-to-peer commands |
+| `harness-sync` | `/harness` | Manage the harness key, sync, and plugins |
+| `bot` | `/bot` | Talk to peer harnesses sharing the harness key |
+
+#### Writing your own plugin
+
+Custom plugins live on disk under the app storage `plugins/<name>/index.js` and are loaded
+after the built-ins. From the composer:
+
+```
+/harness new my-plugin     # scaffold plugins/my-plugin/index.js
+/harness plugins           # list loaded plugins and their sources
+/harness reload            # reload after editing
+```
+
+A plugin's default export is a plain object. Plugins authored on disk cannot resolve
+Bare-app internal specifiers, so a default-export object (as scaffolded by `/harness new`) is
+the supported form:
+
+```js
+export default {
+  name: 'my-plugin',
+  version: '1.0.0',
+  commands: [
+    {
+      name: 'my-plugin',
+      summary: 'Say hello.',
+      usage: '/my-plugin [name]',
+      handler(parsed, services) {
+        return { content: `Hello, ${parsed.args[0] || 'world'}!`, metadata: { kind: 'slash-help' } };
+      }
+    }
+  ]
+};
+```
+
+`handler(parsed, services)` receives the parsed slash input and the worker service facades
+(`swarm`, `dht`, `drive`, `localdrive`, `mirror`, `beam`, `chat`, `harness`, `bot`) and must
+return `{ content, metadata? }`. Optional `activate(ctx)` / `deactivate(ctx)` hooks run when
+the plugin is loaded/unloaded. Plugins can be disabled with `/harness disable <name>`.
+
+#### Syncing a harness across machines (harness key)
+
+Publish this machine's plugins, then follow them elsewhere:
+
+```
+/harness create                 # uploads plugins/, prints a 64-hex harness key
+/harness join <64hex-key>       # on another machine: pulls the plugins read-only
+/harness push                   # re-publish after editing
+/harness pull                   # re-fetch on a follower
+/harness leave                  # stop following
+```
+
+The key can also be supplied at launch time:
+
+```bash
+pear run --dev . --harness-key=<64hex>
+```
+
+Machines sharing a harness key can talk to each other as bots:
+
+```
+/bot enable                     # join the harness swarm
+/bot peers
+/bot send <peer> <text>
+/bot broadcast <text>
+```
+
+Peer messages are answered by the local LLM; bot-authored replies are never re-answered, so
+two harnesses cannot loop. The bot is opt-in.
+
 ### Running the Desktop App through Pear seeding
 
 1. Launch from Pear seed:
@@ -154,6 +281,40 @@ The server component makes your local LLM providers accessible over P2P:
 
 > **Note**: The server app is optional and only needed when you want to connect to a remote machine where you can't run the desktop app directly. The desktop app can act as both a client and server/host without requiring the separate server component.
 
+### OpenAI-compatible endpoint
+
+Both `server.js` and `bridge.js` expose an OpenAI/Anthropic-compatible HTTP surface,
+so any client that speaks those wire formats (Claude Code, Codex, Hermes, the OpenAI
+SDK) can use a machine's GPU inference.
+
+- `node server.js` serves the endpoints on `127.0.0.1:8080` backed directly by the
+  host's local provider.
+- `node bridge.js --topic=<64-hex topic from the host>` joins the room as a peer and
+  serves the same endpoints on its own loopback port, forwarding every request over
+  the DHT room to the host and streaming the answer back.
+
+Routes (both `http://host:port/...` and `http://host:port/v1/...` base URLs work):
+`POST /v1/chat/completions`, `POST /v1/completions`, `POST /v1/messages`,
+`POST /v1/messages/count_tokens`, `POST /v1/responses`, `GET /v1/models`.
+
+```bash
+# host (http://127.0.0.1:8080/v1) prints the topic and the base URL
+node server.js --local-dht=40001
+
+# bridge (http://127.0.0.1:8081/v1) joins the same room
+node bridge.js --local-dht=40001 --topic=<topic from the host> --http-port=8081 --api-key=sk-test
+
+# point a client at it
+curl -sN http://127.0.0.1:8081/v1/chat/completions \
+  -H 'Authorization: Bearer sk-test' -H 'Content-Type: application/json' \
+  -d '{"model":"qwen3","messages":[{"role":"user","content":"reply with exactly: ok"}]}'
+```
+
+Flags: `--http-port`, `--http-host` (default `127.0.0.1`), `--api-key` (any bearer
+accepted when unset), `--model` (pin a model), `--no-http`. Multi-turn messages and
+tool definitions/results survive the round trip on every route. Auth is off by
+default; widening `--http-host` without `--api-key` exposes the host's GPU to the
+network.
 
 ### Provider and Model Selection
 
@@ -244,6 +405,10 @@ SeekDeep is built with a modern modular ES6 architecture for maintainability and
 seekdeep/
 ├── js/                    # Modular JavaScript architecture
 │   ├── main.js            # Main application bootstrap
+│   ├── tui/               # Terminal client: args, in-memory pipe, renderer, app
+│   ├── harness/           # Plugin harness: loader, SDK, sync, bot wiring
+│   ├── slash/             # Slash parser, runtime, and command tags
+│   ├── p2p/               # Bare worker services, RPC, and bot service
 │   ├── ui/                # User interface modules
 │   │   ├── elements.js    # DOM element management
 │   │   ├── events.js      # Event handling
@@ -263,7 +428,9 @@ seekdeep/
 │       ├── formatting.js  # Message formatting
 │       └── history.js     # Chat history
 ├── index.html             # Main UI structure and styling
+├── plugins/               # Built-in harness plugins (p2p-core, harness-sync, bot)
 ├── server.js              # Optional standalone server component
+├── tui.js                 # Terminal UI entrypoint (separate from the desktop app)
 ├── package.json           # Project configuration and dependencies
 ├── lib/                   # External libraries
 │   └── marked.min.js      # Markdown parser
@@ -500,20 +667,20 @@ Below are examples of the actual JSON message structures used in the P2P communi
   "type": "models_update",
   "models": [
     {
+      "id": "llama2:7b",
       "name": "llama2:7b",
-      "modified_at": "2025-03-01T10:30:45.000Z",
-      "size": 4200000000,
-      "digest": "sha256:a1b2c3..."
+      "created": 1740825045
     },
     {
+      "id": "deepseek-coder:6.7b",
       "name": "deepseek-coder:6.7b",
-      "modified_at": "2025-03-05T14:22:10.000Z",
-      "size": 3800000000,
-      "digest": "sha256:d4e5f6..."
+      "created": 1741179730
     }
   ]
 }
 ```
+`created` is optional and, when present, is the provider's model timestamp in Unix
+seconds (`/v1/models` falls back to the current time).
 
 #### Model Request Message (Peer → Host)
 ```json

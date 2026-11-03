@@ -5,11 +5,16 @@
  * (`host` | `peer` | `none`), the collaborative flag, the connection set, the
  * peer map, and the LLM provider router. It never touches the DOM; all
  * renderer-facing output is emitted through `onEvent` as `chat.event` payloads.
+ *
+ * Besides the legacy prompt path (`chat.send` → `query`/`response`), it carries
+ * the multi-turn chat surface used by the OpenAI/Anthropic bridge:
+ * `chat.request` → `chat_query` → streamed `chat_response` frames back to the
+ * requester (host-local, peer, or relayed through the host).
  */
 import b4a from 'b4a';
 import crypto from 'hypercore-crypto';
 import Hyperswarm from 'hyperswarm';
-import { parsePeerMessage, serializePeerMessage } from './protocol.js';
+import { parsePeerMessage, serializePeerMessage, MAX_CHAT_FRAME_BYTES } from './protocol.js';
 import { getDefaultModels } from '../llm/models.js';
 
 const MAX_PEERS = 32;
@@ -77,7 +82,7 @@ function createChatService(options = {}) {
 
   function sendTo(conn, message) {
     if (!conn || conn.destroyed) return false;
-    try { conn.write(serializePeerMessage(message)); return true; } catch { return false; }
+    try { conn.write(serializePeerMessage(message, { maxMessageBytes: MAX_CHAT_FRAME_BYTES })); return true; } catch { return false; }
   }
   function broadcast(message, excludeConn) {
     let sent = 0;
@@ -122,7 +127,7 @@ function createChatService(options = {}) {
     models = list;
     const wireModels = list.map((model) => {
       const entry = { id: model.id, name: model.name };
-      if (model.modified_at) entry.modified_at = model.modified_at;
+      if (model.created !== undefined) entry.created = model.created;
       return entry;
     });
     const frame = { type: 'models_update', models: wireModels };
@@ -131,30 +136,83 @@ function createChatService(options = {}) {
     return { provider: active, models: list };
   }
 
-  function runHostRequest(requestId, model, prompt) {
+  function runHostRequest(requestId, model, prompt, requesterConn) {
     return resolveProvider().then((active) => providers.ask(active, model, prompt, {
       onChunk: (chunk) => {
         if (!chunk) return;
         emit('response', { requestId, chunk, done: false });
+        if (requesterConn) {
+          sendTo(requesterConn, { type: 'response', requestId, data: chunk, isComplete: false, isJson: false, isPrivate: true, fromPeerId: publicKey });
+        }
         if (collaborative) {
-          broadcast({ type: 'response', requestId, data: chunk, isComplete: false, isJson: false, isPrivate: false, fromPeerId: publicKey });
+          broadcast({ type: 'response', requestId, data: chunk, isComplete: false, isJson: false, isPrivate: false, fromPeerId: publicKey }, requesterConn);
         }
       }
     })).then(
       () => {
         emit('response', { requestId, chunk: '', done: true });
+        if (requesterConn) {
+          sendTo(requesterConn, { type: 'response', requestId, data: '', isComplete: true, isJson: false, isPrivate: true, fromPeerId: publicKey });
+        }
         if (collaborative) {
-          broadcast({ type: 'response', requestId, data: '', isComplete: true, isJson: false, isPrivate: false, fromPeerId: publicKey });
+          broadcast({ type: 'response', requestId, data: '', isComplete: true, isJson: false, isPrivate: false, fromPeerId: publicKey }, requesterConn);
         }
       },
       (error) => {
-        systemMessage(`Error: ${error?.message || 'LLM request failed'}`, requestId);
+        const message = error?.message || 'LLM request failed';
+        if (requesterConn) {
+          sendTo(requesterConn, { type: 'response', requestId, data: '', isComplete: true, isJson: false, isPrivate: true, fromPeerId: publicKey, error: message });
+        }
+        systemMessage(`Error: ${message}`, requestId);
         emit('response', { requestId, chunk: '', done: true });
         if (collaborative) {
-          broadcast({ type: 'response', requestId, data: '', isComplete: true, isJson: false, isPrivate: false, fromPeerId: publicKey });
+          broadcast({ type: 'response', requestId, data: '', isComplete: true, isJson: false, isPrivate: false, fromPeerId: publicKey }, requesterConn);
         }
       }
     );
+  }
+
+  function runChatRequest(requestId, message, requesterConn) {
+    const deliver = (frame) => {
+      if (requesterConn) sendTo(requesterConn, { type: 'chat_response', requestId, ...frame });
+      emit('chat_response', { requestId, ...frame });
+    };
+
+    const onEvent = (event) => {
+      if (event.type === 'text') {
+        deliver({ kind: 'text', text: event.text });
+      } else if (event.type === 'tool_call') {
+        const frame = { kind: 'tool_call', index: event.index, argumentsDelta: event.argumentsDelta };
+        if (event.id !== undefined) frame.id = event.id;
+        if (event.name !== undefined) frame.name = event.name;
+        deliver(frame);
+      }
+      // `reasoning` events are dropped: a thinking stream would corrupt an agent
+      // transcript, and Anthropic thinking blocks need signatures we cannot forge.
+    };
+
+    return resolveProvider()
+      .then((active) => {
+        if (typeof providers.chat !== 'function') throw new Error('Host provider does not support chat completions');
+        const params = { messages: message.messages, tools: message.tools || [] };
+        if (message.temperature !== undefined) params.temperature = message.temperature;
+        if (message.maxTokens !== undefined) params.maxTokens = message.maxTokens;
+        if (message.stop !== undefined) params.stop = message.stop;
+        return providers.chat(active, message.model, params, onEvent);
+      })
+      .then(
+        (result) => {
+          const done = { kind: 'done', finishReason: result?.finishReason || 'stop' };
+          if (result?.usage?.promptTokens !== undefined) done.promptTokens = result.usage.promptTokens;
+          if (result?.usage?.completionTokens !== undefined) done.completionTokens = result.usage.completionTokens;
+          deliver(done);
+        },
+        (error) => {
+          const failure = error?.message || 'Chat request failed';
+          deliver({ kind: 'error', error: failure });
+          systemMessage(`Error: ${failure}`, requestId);
+        }
+      );
   }
 
   function handleHandshake(conn, peerId, message) {
@@ -171,18 +229,18 @@ function createChatService(options = {}) {
     systemMessage(`Peer ${peerId.slice(0, 8)}... identified as ${displayName}`);
   }
 
-  function handleHostQuery(peerId, message) {
+  function handleHostQuery(peerId, message, conn) {
     if (collaborative) {
       const fromPeer = peers.get(peerId)?.displayName || `Peer${peerId.slice(0, 6)}`;
       emit('message', { message: { id: nextId(), type: 'user', content: message.prompt, fromPeer, requestId: message.requestId, timestamp: now() } });
     }
-    void runHostRequest(message.requestId, message.model, message.prompt);
+    void runHostRequest(message.requestId, message.model, message.prompt, conn);
   }
 
   function handleData(conn, peerId, data) {
     let message;
     try {
-      message = parsePeerMessage(data);
+      message = parsePeerMessage(data, { maxMessageBytes: MAX_CHAT_FRAME_BYTES });
     } catch (error) {
       systemMessage(`Ignored malformed peer message: ${error?.message || 'invalid payload'}`);
       return;
@@ -199,7 +257,7 @@ function createChatService(options = {}) {
         systemMessage(`Host changed chat mode to ${collaborative ? 'Collaborative' : 'Private'}.`);
         break;
       case 'models_update':
-        models = message.models.map((entry) => ({ id: entry.id, name: entry.name, ...(entry.modified_at ? { modified_at: entry.modified_at } : {}) }));
+        models = message.models.map((entry) => ({ id: entry.id, name: entry.name, ...(entry.created !== undefined ? { created: entry.created } : {}) }));
         emit('models', { provider, models });
         systemMessage(`Received ${models.length} models from host.`);
         break;
@@ -208,20 +266,36 @@ function createChatService(options = {}) {
         break;
       case 'query':
         if (role === 'host') {
-          handleHostQuery(peerId, message);
+          handleHostQuery(peerId, message, conn);
         } else {
           const hostConn = findHostConnection();
           if (hostConn && hostConn !== conn) sendTo(hostConn, message);
         }
         break;
-      case 'response':
-        emit('response', { requestId: message.requestId, chunk: message.data, done: message.isComplete });
+      case 'response': {
+        const payload = { requestId: message.requestId, chunk: message.data, done: message.isComplete };
+        if (message.error !== undefined) payload.error = message.error;
+        emit('response', payload);
         break;
+      }
       case 'peer_message':
         if (collaborative) {
           emit('message', { message: { id: nextId(), type: message.messageType, content: message.content, fromPeer: message.fromPeer, requestId: message.requestId, timestamp: now() } });
         }
         break;
+      case 'chat_query':
+        if (role === 'host') {
+          void runChatRequest(message.requestId, message, conn);
+        } else {
+          const hostConn = findHostConnection();
+          if (hostConn && hostConn !== conn) sendTo(hostConn, message);
+        }
+        break;
+      case 'chat_response': {
+        const { type, requestId, kind, ...rest } = message;
+        emit('chat_response', { requestId, kind, ...rest });
+        break;
+      }
       default:
         break;
     }
@@ -358,13 +432,35 @@ function createChatService(options = {}) {
       if (collaborative) {
         broadcast({ type: 'peer_message', messageType: 'user', content: prompt, fromPeer: 'Host', requestId });
       }
-      void runHostRequest(requestId, model, prompt);
+      void runHostRequest(requestId, model, prompt, null);
       return { requestId };
     }
 
     const hostConn = findHostConnection();
     if (!hostConn) throw new Error('Not connected to a host');
     sendTo(hostConn, { type: 'query', model, prompt, requestId, fromPeerId: publicKey });
+    return { requestId };
+  }
+
+  // Multi-turn chat used by the HTTP bridge. On the host it answers locally; on
+  // a peer it forwards the frame to the host and streams `chat_response` frames
+  // back through `onEvent`.
+  function requestChat(params = {}) {
+    const requestId = nextId();
+    const frame = { type: 'chat_query', requestId, model: params.model, messages: params.messages, fromPeerId: publicKey };
+    if (params.tools !== undefined) frame.tools = params.tools;
+    if (params.temperature !== undefined) frame.temperature = params.temperature;
+    if (params.maxTokens !== undefined) frame.maxTokens = params.maxTokens;
+    if (params.stop !== undefined) frame.stop = params.stop;
+
+    if (role === 'host') {
+      void runChatRequest(requestId, frame, null);
+      return { requestId };
+    }
+
+    const hostConn = findHostConnection();
+    if (!hostConn) throw new Error('Not connected to a host');
+    sendTo(hostConn, frame);
     return { requestId };
   }
 
@@ -375,6 +471,7 @@ function createChatService(options = {}) {
     'chat.leave': () => leave(),
     'chat.peers': () => ({ peers: peerList() }),
     'chat.send': (params) => send(params),
+    'chat.request': (params) => requestChat(params),
     'chat.setMode': (params) => setMode(params),
     'chat.refreshModels': () => refreshModels(),
     'chat.setProvider': (params) => setProvider(params)

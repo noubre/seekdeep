@@ -1,30 +1,29 @@
 import Hyperbeam from 'hyperbeam';
 import b4a from 'b4a';
-import crypto from 'hypercore-crypto';
 import DHT from 'hyperdht';
+import {
+  MAX_NAME_CHARS,
+  positiveInteger,
+  normalizePrintableName,
+  isPrintableReference,
+  createIdFactory,
+  allocateId
+} from './service-kit.js';
 
 const KEY_PATTERN = /^[a-z2-7]{52}$/;
-const CONTROL_PATTERN = /[\u0000-\u001f\u007f]/;
-const MAX_NAME_CHARS = 80;
-const MAX_REFERENCE_CHARS = 160;
 const MAX_MESSAGE_BYTES = 64 * 1024;
 const MAX_BEAMS = 32;
 const MAX_PENDING_MESSAGES = 100;
 const MAX_BUFFER_BYTES = 128 * 1024;
 
 function byteLength(value) { return b4a.byteLength(value); }
-function positiveInteger(value, label) {
-  if (!Number.isSafeInteger(value) || value < 1) throw new TypeError(`${label} must be a positive integer`);
-  return value;
-}
 function normalizeName(value) {
-  if (typeof value !== 'string') throw new TypeError('Beam name must be a string');
-  const name = value.normalize('NFC').trim().replace(/\s+/gu, ' ');
-  if (!name || name.length > MAX_NAME_CHARS || CONTROL_PATTERN.test(name)) throw new TypeError(`Beam name must be 1-${MAX_NAME_CHARS} printable characters`);
-  return name;
+  const name = normalizePrintableName(value);
+  if (name) return name;
+  throw new TypeError(typeof value === 'string' ? `Beam name must be 1-${MAX_NAME_CHARS} printable characters` : 'Beam name must be a string');
 }
 function normalizeReference(value) {
-  if (typeof value !== 'string' || !value || value.length > MAX_REFERENCE_CHARS || CONTROL_PATTERN.test(value)) throw new TypeError('Beam reference is invalid');
+  if (!isPrintableReference(value)) throw new TypeError('Beam reference is invalid');
   return value;
 }
 function normalizeKey(value) {
@@ -36,13 +35,12 @@ function normalizeContent(value) {
   if (byteLength(value) > MAX_MESSAGE_BYTES) throw new RangeError('Beam content is too large');
   return value;
 }
-function defaultIdFactory() { return `beam-${b4a.toString(crypto.randomBytes(12), 'hex')}`; }
 function defaultDhtFactory() { return new DHT({ ephemeral: true }); }
 
 function createBeamService(options = {}) {
   if (!options || typeof options !== 'object' || Array.isArray(options)) throw new TypeError('Beam service options must be an object');
   const Beam = options.Hyperbeam || Hyperbeam;
-  const idFactory = options.idFactory || defaultIdFactory;
+  const idFactory = options.idFactory || createIdFactory('beam');
   const dhtFactory = options.dhtFactory || defaultDhtFactory;
   const maxBeams = positiveInteger(options.maxBeams ?? MAX_BEAMS, 'maxBeams');
   const maxPendingMessages = positiveInteger(options.maxPendingMessages ?? MAX_PENDING_MESSAGES, 'maxPendingMessages');
@@ -103,14 +101,12 @@ function createBeamService(options = {}) {
     const normalizedName = normalizeName(name);
     if (records.size >= maxBeams) throw new RangeError('Beam limit reached');
     if (names.has(normalizedName.toLowerCase())) throw new Error('A beam with that name already exists');
-    let id;
-    for (let attempt = 0; attempt < 8; attempt += 1) {
-      id = idFactory();
-      if (typeof id !== 'string' || !id || id.length > MAX_REFERENCE_CHARS || CONTROL_PATTERN.test(id)) throw new TypeError('idFactory returned an invalid beam ID');
-      if (!records.has(id) && !names.has(id.toLowerCase())) break;
-      id = null;
-    }
-    if (!id) throw new Error('Unable to generate a unique beam ID');
+    const id = allocateId({
+      idFactory,
+      isTaken: (candidate) => records.has(candidate) || names.has(candidate.toLowerCase()),
+      invalidMessage: 'idFactory returned an invalid beam ID',
+      exhaustedMessage: 'Unable to generate a unique beam ID'
+    });
     const dht = dhtFactory();
     // hyperbeam's constructor treats a non-string first argument as the options
     // object (`if (typeof key !== 'string') { options = key; key = null }`), so the
@@ -165,4 +161,4 @@ function createBeamService(options = {}) {
   });
 }
 
-export { KEY_PATTERN, MAX_MESSAGE_BYTES, createBeamService };
+export { createBeamService };

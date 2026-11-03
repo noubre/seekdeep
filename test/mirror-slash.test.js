@@ -1,6 +1,6 @@
 import test from 'brittle';
 import { readFile } from 'node:fs/promises';
-import { dispatchSlashTag, listSlashTags } from '../js/slash/registry.js';
+import { dispatchSlashTag, listSlashTags } from './helpers/slash-runtime.js';
 
 function collector() {
   const output = [];

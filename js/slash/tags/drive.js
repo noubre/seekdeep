@@ -1,31 +1,30 @@
+import {
+  CONTROL_PATTERN,
+  MAX_NAME_CHARS,
+  MAX_REFERENCE_CHARS,
+  byteLength,
+  requireService,
+  metadata,
+  assertCount,
+  isPrintableName,
+  isPrintableReference
+} from './support.js';
+
 const KEY_PATTERN = /^[0-9a-f]{64}$/i;
-const CONTROL_PATTERN = /[\u0000-\u001f\u007f]/;
 const ACTIONS = new Set(['create', 'open', 'list', 'status', 'put', 'get', 'files', 'del', 'close']);
-const MAX_NAME_CHARS = 80;
-const MAX_REFERENCE_CHARS = 160;
 const MAX_PATH_BYTES = 512;
 const MAX_CONTENT_BYTES = 64 * 1024;
 const MAX_FILES = 100;
 const MAX_DRIVES = 64;
 
-function requireService(services) {
-  const service = services?.drive;
-  if (!service) throw new Error('Drive service is unavailable.');
-  return service;
-}
-
-function byteLength(value) {
-  return new TextEncoder().encode(value).byteLength;
-}
-
 function assertReference(value) {
-  if (typeof value !== 'string' || !value || value.length > MAX_REFERENCE_CHARS || CONTROL_PATTERN.test(value)) {
+  if (!isPrintableReference(value)) {
     throw new Error(`Drive reference must be 1-${MAX_REFERENCE_CHARS} printable characters.`);
   }
 }
 
 function assertName(value) {
-  if (typeof value !== 'string' || !value.trim() || value.length > MAX_NAME_CHARS || CONTROL_PATTERN.test(value)) {
+  if (!isPrintableName(value)) {
     throw new Error(`Drive name must be 1-${MAX_NAME_CHARS} printable characters.`);
   }
 }
@@ -65,10 +64,6 @@ function safeDescriptor(row) {
   return descriptor;
 }
 
-function metadata(action, extra = {}) {
-  return { kind: 'slash-drive', command: 'drive', action, ...extra };
-}
-
 function descriptorLines(row) {
   return [
     `${row.name} (${row.id})`,
@@ -84,14 +79,8 @@ function descriptorResult(action, unsafeRow, heading) {
   const row = safeDescriptor(unsafeRow);
   return {
     content: [heading, ...descriptorLines(row)].join('\n'),
-    metadata: metadata(action, { descriptor: row })
+    metadata: metadata('slash-drive', 'drive', action, { descriptor: row })
   };
-}
-
-function assertCount(action, args, minimum, maximum = minimum) {
-  if (args.length < minimum || args.length > maximum) {
-    throw new Error(`/drive ${action} expects ${minimum === maximum ? minimum : `${minimum}-${maximum}`} argument${maximum === 1 ? '' : 's'}.`);
-  }
 }
 
 async function handleDrive(parsed, services) {
@@ -102,16 +91,16 @@ async function handleDrive(parsed, services) {
     throw new Error('Use /drive create, open, list, status, put, get, files, del, or close.');
   }
 
-  if (action === 'list') assertCount(action, args, 0);
+  if (action === 'list') assertCount('drive', action, args, 0);
   else if (action === 'create') {
-    assertCount(action, args, 1);
+    assertCount('drive', action, args, 1);
     assertName(args[0]);
   } else if (action === 'open') {
-    assertCount(action, args, 1, 2);
+    assertCount('drive', action, args, 1, 2);
     if (!KEY_PATTERN.test(args[0])) throw new Error('/drive open requires a 64-character hexadecimal public key.');
     if (args[1] !== undefined) assertName(args[1]);
   } else if (action === 'files') {
-    assertCount(action, args, 1, 2);
+    assertCount('drive', action, args, 1, 2);
     assertReference(args[0]);
     if (args[1] !== undefined) assertPath(args[1], true);
   } else if (action === 'put') {
@@ -120,12 +109,12 @@ async function handleDrive(parsed, services) {
     assertPath(args[1]);
     if (byteLength(args.slice(2).join(' ')) > MAX_CONTENT_BYTES) throw new Error('Drive content is too large.');
   } else {
-    assertCount(action, args, action === 'get' || action === 'del' ? 2 : 1);
+    assertCount('drive', action, args, action === 'get' || action === 'del' ? 2 : 1);
     assertReference(args[0]);
     if (action === 'get' || action === 'del') assertPath(args[1]);
   }
 
-  const drive = requireService(services);
+  const drive = requireService(services, 'drive', 'Drive service is unavailable.');
   if (typeof drive[action === 'close' ? 'close' : action] !== 'function') throw new Error('Drive service is unavailable.');
   if (action === 'create') return descriptorResult(action, await drive.create(args[0]), 'Created Hyperdrive.');
   if (action === 'open') return descriptorResult(action, await drive.open(args[0].toLowerCase(), args[1]), 'Opened Hyperdrive.');
@@ -135,7 +124,7 @@ async function handleDrive(parsed, services) {
     const rows = result.map(safeDescriptor);
     return {
       content: rows.length ? `Hyperdrives (${rows.length}):\n${rows.map((row) => `- ${row.name} (${row.id}) ${row.writable ? 'writable' : 'read-only'} ${row.opened ? 'open' : 'closed'}\n  ${row.key}`).join('\n')}` : 'No Hyperdrives.',
-      metadata: metadata(action, { descriptors: rows })
+      metadata: metadata('slash-drive', 'drive', action, { descriptors: rows })
     };
   }
   if (action === 'status') {
@@ -147,20 +136,20 @@ async function handleDrive(parsed, services) {
     }
     const descriptor = hasCount ? { ...row, fileCount: unsafeRow.fileCount, fileCountCapped: unsafeRow.fileCountCapped } : row;
     const count = hasCount ? `\nFiles: ${descriptor.fileCount}${descriptor.fileCountCapped ? '+' : ''}` : '';
-    return { content: `${descriptorLines(row).join('\n')}${count}`, metadata: metadata(action, { descriptor }) };
+    return { content: `${descriptorLines(row).join('\n')}${count}`, metadata: metadata('slash-drive', 'drive', action, { descriptor }) };
   }
   if (action === 'put') {
     const result = await drive.put(args[0], args[1], args.slice(2).join(' '));
     if (!result || typeof result.path !== 'string' || !Number.isSafeInteger(result.bytes) || !Number.isSafeInteger(result.version)) throw new Error('Drive service returned an invalid result.');
     const safe = { path: result.path, bytes: result.bytes, version: result.version };
-    return { content: `Stored ${safe.bytes} bytes at ${safe.path}.\nVersion: ${safe.version}`, metadata: metadata(action, { result: safe }) };
+    return { content: `Stored ${safe.bytes} bytes at ${safe.path}.\nVersion: ${safe.version}`, metadata: metadata('slash-drive', 'drive', action, { result: safe }) };
   }
   if (action === 'get') {
     const result = await drive.get(args[0], args[1]);
     if (!result || typeof result.path !== 'string' || typeof result.content !== 'string' || !Number.isSafeInteger(result.bytes) || byteLength(result.content) > MAX_CONTENT_BYTES) {
       throw new Error('Drive service returned an invalid result.');
     }
-    return { content: `${result.path} (${result.bytes} bytes)\n${result.content}`, metadata: metadata(action, { path: result.path, bytes: result.bytes }) };
+    return { content: `${result.path} (${result.bytes} bytes)\n${result.content}`, metadata: metadata('slash-drive', 'drive', action, { path: result.path, bytes: result.bytes }) };
   }
   if (action === 'files') {
     const result = await drive.files(args[0], args[1]);
@@ -168,13 +157,13 @@ async function handleDrive(parsed, services) {
       throw new Error('Drive service returned an invalid file list.');
     }
     const safe = { files: [...result.files], capped: result.capped };
-    return { content: safe.files.length ? `Drive files${safe.capped ? ' (first results)' : ''}:\n${safe.files.map((file) => `- ${file}`).join('\n')}` : 'No matching drive files.', metadata: metadata(action, safe) };
+    return { content: safe.files.length ? `Drive files${safe.capped ? ' (first results)' : ''}:\n${safe.files.map((file) => `- ${file}`).join('\n')}` : 'No matching drive files.', metadata: metadata('slash-drive', 'drive', action, safe) };
   }
   if (action === 'del') {
     const result = await drive.del(args[0], args[1]);
     if (!result || typeof result.path !== 'string' || typeof result.deleted !== 'boolean' || !Number.isSafeInteger(result.version)) throw new Error('Drive service returned an invalid result.');
     const safe = { path: result.path, deleted: result.deleted, version: result.version };
-    return { content: safe.deleted ? `Deleted ${safe.path}.\nVersion: ${safe.version}` : `No file existed at ${safe.path}.`, metadata: metadata(action, { result: safe }) };
+    return { content: safe.deleted ? `Deleted ${safe.path}.\nVersion: ${safe.version}` : `No file existed at ${safe.path}.`, metadata: metadata('slash-drive', 'drive', action, { result: safe }) };
   }
   return descriptorResult(action, await drive.close(args[0]), 'Closed Hyperdrive.');
 }

@@ -61,29 +61,11 @@ function getSelectedProvider() {
 }
 
 /**
- * Set the selected provider in the provider select dropdown
- * @param {string} provider - The provider to select
- */
-function setSelectedProvider(provider) {
-  if (providerSelect) {
-    providerSelect.value = provider;
-  }
-}
-
-/**
  * Get the selected model from the model select dropdown
  * @returns {string} The ID of the selected model
  */
 function getSelectedModel() {
   return modelSelect ? modelSelect.value : '';
-}
-
-/**
- * Get the current chat mode from the chat mode select dropdown
- * @returns {boolean} True if collaborative mode is selected, false for private mode
- */
-function isCollaborativeModeSelected() {
-  return chatModeSelect ? chatModeSelect.value === 'collaborative' : false;
 }
 
 /**
@@ -156,7 +138,8 @@ function updateRefreshModelsTooltip(message) {
 function updateTopicDisplay(topicKey) {
   if (currentTopicEl) {
     currentTopicEl.textContent = topicKey || '';
-    currentTopicEl.parentElement.style.display = topicKey ? 'flex' : 'none';
+    const container = currentTopicEl.parentElement;
+    if (container) container.classList.toggle('hidden', !topicKey);
   }
 }
 
@@ -190,9 +173,7 @@ export {
   clearPromptArea,
   getPromptValue,
   getSelectedProvider,
-  setSelectedProvider,
   getSelectedModel,
-  isCollaborativeModeSelected,
   setChatModeSelectValue,
   setChatModeSelectEnabled,
   getTopicKeyValue,
@@ -212,7 +193,5 @@ export {
   chatModeSelect,
   providerSelect,
   modelSelect,
-  refreshModelsButton,
-  currentTopicEl,
-  copyTopicButton
+  refreshModelsButton
 };

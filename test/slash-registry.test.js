@@ -6,8 +6,9 @@ import {
   slashRegistry,
   listSlashTags,
   dispatchSlashTag,
-  dispatchSlashTagWithCommands
-} from '../js/slash/registry.js';
+  dispatchSlashTagWithCommands,
+  helpServices
+} from './helpers/slash-runtime.js';
 
 const expectedCommands = ['p2p', 'swarm', 'dht', 'drive', 'localdrive', 'mirror', 'beam'];
 
@@ -162,7 +163,9 @@ test('every slash dispatch path is local-only and uses emitEphemeral', async fun
     const { ctx, output, forbiddenOperations } = privacyCollector();
     const guarded = guardedServices();
     let services = guarded.services;
-    if (input === '/swarm status') {
+    if (input === '/p2p help') {
+      services = helpServices();
+    } else if (input === '/swarm status') {
       services = {
         swarm: {
           status: () => ({
@@ -266,8 +269,8 @@ test('/p2p help is deterministic and lists every family', async function (t) {
   const first = collector();
   const second = collector();
 
-  t.is(await dispatchSlashTag('/p2p help', first.ctx), true);
-  t.is(await dispatchSlashTag('/p2p help', second.ctx), true);
+  t.is(await dispatchSlashTag('/p2p help', first.ctx, helpServices()), true);
+  t.is(await dispatchSlashTag('/p2p help', second.ctx, helpServices()), true);
   t.alike(first.output, second.output, 'same request produces the same local help');
   t.is(first.output.length, 1);
 
@@ -279,7 +282,7 @@ test('/p2p help is deterministic and lists every family', async function (t) {
 test('/p2p help <command> shows focused deterministic help', async function (t) {
   const { output, ctx } = collector();
 
-  t.is(await dispatchSlashTag('/p2p help drive', ctx), true);
+  t.is(await dispatchSlashTag('/p2p help drive', ctx, helpServices()), true);
   t.is(output.length, 1);
   t.ok(output[0].content.includes('/drive'));
   t.ok(output[0].content.includes('Usage:'));
@@ -291,8 +294,8 @@ test('/help aliases /p2p help exactly', async function (t) {
     const alias = collector();
     const canonical = collector();
 
-    t.is(await dispatchSlashTag(`/help${suffix}`, alias.ctx), true);
-    t.is(await dispatchSlashTag(`/p2p help${suffix}`, canonical.ctx), true);
+    t.is(await dispatchSlashTag(`/help${suffix}`, alias.ctx, helpServices()), true);
+    t.is(await dispatchSlashTag(`/p2p help${suffix}`, canonical.ctx, helpServices()), true);
     t.alike(alias.output, canonical.output, `/help${suffix} matches canonical output`);
   }
 });

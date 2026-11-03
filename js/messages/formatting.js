@@ -2,6 +2,7 @@
  * Message Formatting module
  * Contains functions for formatting messages and processing thinking content
  */
+import { splitThinking } from './thinking.js';
 
 
 /**
@@ -54,47 +55,6 @@ function escapeHtml(text) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
-}
-
-/**
- * Format thinking content with HTML for client-side rendering
- * @param {string} text - The text to process
- * @returns {string} The processed text with thinking content formatted
- */
-function formatThinkingContent(text) {
-  // Handle non-string input
-  if (typeof text !== 'string') {
-    return text;
-  }
-  
-  // Check if there are any thinking tags
-  if (!text.includes('<think>') || !text.includes('</think>')) {
-    return text;
-  }
-  
-  // Extract all thinking content first
-  let allThinkingContent = '';
-  const thinkingMatches = text.match(/<think>([\s\S]*?)<\/think>/g) || [];
-  
-  if (thinkingMatches.length > 0) {
-    // Get the content from the last thinking tag (most up-to-date)
-    const lastThinkingMatch = thinkingMatches[thinkingMatches.length - 1];
-    allThinkingContent = lastThinkingMatch.replace(/<think>([\s\S]*?)<\/think>/, '$1');
-  }
-  
-  // Remove all thinking tags from the original text
-  let cleanedText = text.replace(/<think>[\s\S]*?<\/think>/g, '');
-  
-  // If we have thinking content, add it back with proper formatting
-  if (allThinkingContent.trim()) {
-    // Format thinking content with special styling for rendering in the UI
-    const formattedThinking = `<div class="thinking-content"><span class="thinking-label">Thinking:</span>\n${allThinkingContent}</div>`;
-    
-    // Add the formatted thinking content back to the text
-    return formattedThinking + cleanedText;
-  }
-  
-  return cleanedText;
 }
 
 /**
@@ -179,25 +139,14 @@ function renderMarkdown(text) {
 function renderAssistantContent(text) {
   if (typeof text !== 'string') return '';
 
-  let thinkingText = '';
-  let answerText = text;
-  const closedThinking = [...text.matchAll(/<think>([\s\S]*?)<\/think>/g)];
+  let { thinking: thinkingText, answer: answerText, open } = splitThinking(text);
 
-  if (closedThinking.length > 0) {
-    thinkingText = closedThinking[closedThinking.length - 1][1];
-    answerText = text.replace(/<think>[\s\S]*?<\/think>/g, '');
-  } else {
-    const openThinkingIndex = text.lastIndexOf('<think>');
-    if (openThinkingIndex !== -1) {
-      thinkingText = text.slice(openThinkingIndex + '<think>'.length);
-      answerText = text.slice(0, openThinkingIndex);
-    } else {
-      // Support messages persisted by the older formatter without trusting its HTML.
-      const legacyMatch = text.match(/^<div class="thinking-content"><span class="thinking-label">Thinking:<\/span>\s*([\s\S]*?)<\/div>([\s\S]*)$/);
-      if (legacyMatch) {
-        thinkingText = legacyMatch[1];
-        answerText = legacyMatch[2];
-      }
+  if (!thinkingText && !open) {
+    // Support messages persisted by the older formatter without trusting its HTML.
+    const legacyMatch = text.match(/^<div class="thinking-content"><span class="thinking-label">Thinking:<\/span>\s*([\s\S]*?)<\/div>([\s\S]*)$/);
+    if (legacyMatch) {
+      thinkingText = legacyMatch[1];
+      answerText = legacyMatch[2];
     }
   }
 
@@ -208,78 +157,11 @@ function renderAssistantContent(text) {
   return thinkingHtml + renderMarkdown(answerText.trimStart());
 }
 
-/**
- * Parse the Ollama response to extract the text content
- * @param {string|object} text - The raw response from Ollama API
- * @returns {string} The extracted text content
- */
-function parseOllamaResponse(text) {
-  // Handle null or undefined input
-  if (!text) {
-    return '';
-  }
-  
-  // If the input is not a string, convert it to a string
-  if (typeof text !== 'string') {
-    return text && typeof text === 'object' ? JSON.stringify(text) : String(text || '');
-  }
-  
-  // Try to parse as a JSON object first
-  try {
-    // For streaming responses, Ollama may return multiple JSON objects
-    // Split by newlines and attempt to parse each line
-    const lines = text.split('\n').filter(line => line.trim());
-    let lastValidResponse = '';
-    
-    // If there are multiple lines, try to parse each one
-    if (lines.length > 0) {
-      for (const line of lines) {
-        try {
-          const json = JSON.parse(line);
-          // If we have a valid Ollama response with a text field, use it
-          if (json && typeof json.response === 'string' && json.response.trim() !== '') {
-            lastValidResponse = json.response;
-          }
-        } catch (innerErr) {
-          // If a line can't be parsed as JSON, ignore it
-          console.log("Couldn't parse line as JSON:", line);
-        }
-      }
-      
-      // If we found at least one valid response, return it
-      if (lastValidResponse) {
-        return formatThinkingContent(lastValidResponse);
-      }
-    }
-    
-    // If we didn't find any valid responses in lines, try parsing the entire text
-    const json = JSON.parse(text);
-    
-    // Handle the Ollama API response format
-    if (json.response) {
-      return formatThinkingContent(json.response);
-    } else if (json.message) {
-      return formatThinkingContent(json.message);
-    } else {
-      // If we can't find the response field, return an empty string
-      // instead of the raw JSON which would be confusing to display
-      console.warn("Unknown JSON response format:", json);
-      return '';
-    }
-  } catch (e) {
-    // If it's not valid JSON at all, return the raw text
-    // This handles cases where the API might return plain text
-    return formatThinkingContent(text);
-  }
-}
-
 // Export functions
 export {
-  formatThinkingContent,
   containsMarkdown,
   renderMarkdown,
   renderAssistantContent,
-  parseOllamaResponse,
   sanitizeHtml,
   escapeHtml
 };
