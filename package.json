@@ -70,6 +70,7 @@
     "bare-os": "^2.2.0",
     "bare-path": "^2.1.0",
     "corestore": "7.12.2",
+    "fs": "npm:bare-node-fs@^1.0.2",
     "hyperbeam": "3.1.0",
     "hypercore-crypto": "^3.3.3",
     "hyperdht": "6.33.2",

@@ -1,0 +1,54 @@
+name: SeekDeep
+include:
+  - app/addons/addons.yml
+options:
+  bundleIdPrefix: to.seekdeep
+  deploymentTarget:
+    macOS: "14.0"
+packages:
+  BareKit:
+    url: https://github.com/holepunchto/bare-kit-swift
+    branch: main
+targets:
+  SeekDeep:
+    type: application
+    platform: macOS
+    sources:
+      - path: app
+        excludes: [frameworks, addons, app.bundle, Info.plist, SeekDeep.entitlements]
+      - path: app/app.bundle
+        optional: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: to.seekdeep.native
+        SWIFT_VERSION: "5.0"
+        SWIFT_STRICT_CONCURRENCY: minimal
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_IDENTITY: "-"
+    info:
+      path: app/Info.plist
+      properties:
+        CFBundleName: SeekDeep
+        LSMinimumSystemVersion: "14.0"
+        NSHighResolutionCapable: true
+    entitlements:
+      path: app/SeekDeep.entitlements
+      properties:
+        com.apple.security.cs.allow-jit: true
+        com.apple.security.cs.allow-unsigned-executable-memory: true
+        com.apple.security.network.client: true
+        com.apple.security.network.server: true
+    dependencies:
+      - package: BareKit
+    scheme:
+      preActions:
+        - name: Link
+          script: |
+            set -e
+            PATH="${PATH}" "${PWD}/node_modules/.bin/bare-link" --preset darwin --out ${PWD}/app/addons ${PWD}
+        - name: Pack
+          script: |
+            set -e
+            PATH="${PATH}" "${PWD}/node_modules/.bin/bare-pack" --preset darwin --linked --base ${PWD} --out ${PWD}/app/app.bundle ${PWD}/worklet/backend.js
+            test -s "${PWD}/app/app.bundle"

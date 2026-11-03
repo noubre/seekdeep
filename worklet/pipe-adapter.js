@@ -3,21 +3,56 @@
  * js/p2p/rpc-server.js expects: on/off/once for data|error|close|end,
  * write(chunk, cb), end(), destroy(), and `destroyed` / `writableEnded` flags.
  *
- * Zero dependencies on purpose: this file runs inside Bare, inside Node, and in tests.
+ * Zero imports on purpose: this file runs inside Bare, inside Node, and in tests.
+ * `node:events` does not resolve under Bare — bare-pack leaves it as a runtime import
+ * and the worklet aborts with MODULE_NOT_FOUND — so the six methods we need are inline.
  */
-import { EventEmitter } from 'node:events'
 
 const FORWARDED = ['data', 'error', 'close', 'end']
+
+function createEventEmitter () {
+  const listeners = new Map()
+
+  function entries (name) {
+    let list = listeners.get(name)
+    if (!list) {
+      list = []
+      listeners.set(name, list)
+    }
+    return list
+  }
+
+  return {
+    on (name, handler, once = false) {
+      entries(name).push({ handler, once })
+    },
+    off (name, handler) {
+      listeners.set(name, entries(name).filter((entry) => entry.handler !== handler))
+    },
+    emit (name, payload) {
+      const list = entries(name)
+      if (list.length === 0) return false
+      for (const entry of [...list]) {
+        if (entry.once) listeners.set(name, entries(name).filter((candidate) => candidate !== entry))
+        entry.handler(payload)
+      }
+      return true
+    },
+    listenerCount (name) {
+      return entries(name).length
+    }
+  }
+}
 
 export function createPipeAdapter (ipc) {
   if (!ipc || typeof ipc.write !== 'function') throw new TypeError('createPipeAdapter requires a writable stream')
 
-  const events = new EventEmitter()
+  const events = createEventEmitter()
   let destroyed = false
   let writableEnded = false
 
   // Inbound frames can arrive while the backend is still booting, before
-  // createJsonRpcServer attaches `data`/`end`. EventEmitter drops those, so
+  // createJsonRpcServer attaches `data`/`end`. A plain emitter drops those, so
   // queue them. `end`/`close` are sticky: a later `once('end')` (used by
   // createWorklet to flush drives) must still fire.
   const queued = new Map()
@@ -43,8 +78,7 @@ export function createPipeAdapter (ipc) {
 
   function subscribe (name, handler, once) {
     const hadQueued = (queued.get(name)?.length ?? 0) > 0
-    if (once) events.once(name, handler)
-    else events.on(name, handler)
+    events.on(name, handler, once)
     const flushed = flush(name)
     if (!hadQueued && !flushed && settled.has(name)) {
       events.emit(name, settled.get(name))
@@ -89,7 +123,7 @@ export function createPipeAdapter (ipc) {
         else if (typeof ipc.removeListener === 'function') ipc.removeListener(name, bound[name])
       }
       events.emit('close')
-      if (error) setImmediate(() => events.emit('error', error))
+      if (error) queueMicrotask(() => events.emit('error', error))
     }
   }
 
