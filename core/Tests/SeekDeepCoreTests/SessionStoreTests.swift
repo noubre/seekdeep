@@ -120,4 +120,67 @@ final class SessionStoreTests: XCTestCase {
         let renamed = try await store.rename(id: "missing", name: "Whatever")
         XCTAssertNil(renamed)
     }
+
+    // MARK: - at-rest encryption
+
+    private func encryptedStore() -> SessionStore {
+        SessionStore(root: root, keys: InMemorySessionKey(bytes: Data(repeating: 9, count: 32)))
+    }
+
+    func testEncryptedBodyOnDiskDoesNotContainTheTranscript() async throws {
+        let marker = "SEEKDEEP-PLAINTEXT-MARKER-7f3a"
+        let store = encryptedStore()
+        let original = StoredSession(
+            id: "s1",
+            name: "Secret",
+            createdAt: Date(timeIntervalSince1970: 0),
+            messages: [StoredMessage(ChatMessage(id: "m1", kind: .user, content: marker))]
+        )
+        try await store.save(original)
+
+        let raw = try Data(contentsOf: root.appending(path: "s1.json"))
+        XCTAssertTrue(SessionCrypto.isSealed(raw), "the session body is the sealed envelope")
+        XCTAssertNil(String(data: raw, encoding: .utf8)?.range(of: marker), "the transcript text must not be on disk")
+        // The registry stays plaintext on purpose.
+        let registry = try Data(contentsOf: root.appending(path: "registry.json"))
+        XCTAssertEqual(try JSONDecoder().decode([SessionStore.Entry].self, from: registry).first?.name, "Secret")
+    }
+
+    func testEncryptedSaveLoadRoundTrip() async throws {
+        let store = encryptedStore()
+        let original = session(id: "s1", name: "First", createdAt: 100, messages: 3)
+        try await store.save(original)
+        let loaded = try await store.load(id: "s1")
+        XCTAssertEqual(loaded, original)
+    }
+
+    func testLegacyPlaintextBodyIsReadAndRewrittenSealed() async throws {
+        let original = session(id: "s1", name: "First", messages: 2)
+        try await SessionStore(root: root).save(original)
+        let url = root.appending(path: "s1.json")
+        XCTAssertFalse(SessionCrypto.isSealed(try Data(contentsOf: url)), "precondition: written plaintext")
+
+        let loaded = try await encryptedStore().load(id: "s1")
+        XCTAssertEqual(loaded, original)
+
+        let after = try Data(contentsOf: url)
+        XCTAssertTrue(SessionCrypto.isSealed(after), "the next launch must already be migrated")
+        XCTAssertNil(String(data: after, encoding: .utf8)?.range(of: "hello"), "the rewrite actually sealed the body")
+    }
+
+    func testCorruptBodyReturnsNilRatherThanThrowing() async throws {
+        let store = encryptedStore()
+        try await store.ensureRoot()
+        try Data("not json".utf8).write(to: root.appending(path: "s1.json"))
+        let loaded = try await store.load(id: "s1")
+        XCTAssertNil(loaded)
+    }
+
+    func testSealedBodyOpenedWithTheWrongKeyReturnsNil() async throws {
+        try await SessionStore(root: root, keys: InMemorySessionKey(bytes: Data(repeating: 9, count: 32)))
+            .save(session(id: "s1", name: "First"))
+        let other = SessionStore(root: root, keys: InMemorySessionKey(bytes: Data(repeating: 8, count: 32)))
+        let loaded = try await other.load(id: "s1")
+        XCTAssertNil(loaded, "a wrong key must not yield garbage")
+    }
 }

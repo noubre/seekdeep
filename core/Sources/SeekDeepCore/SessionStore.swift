@@ -64,11 +64,19 @@ public actor SessionStore {
     }
 
     public let root: URL
+    private let keys: SessionKeyProviding?
 
-    public init(root: URL) {
+    /// `keys == nil` keeps the historical plaintext behaviour (every existing test
+    /// constructs `SessionStore(root:)`). Passing a `SessionKeyProviding` seals session
+    /// bodies on save and opens them on load.
+    public init(root: URL, keys: SessionKeyProviding? = nil) {
         self.root = root
+        self.keys = keys
     }
 
+    /// Plaintext on purpose: the registry holds only id, name, createdAt and
+    /// messageCount — never transcript text — so the sidebar can list sessions without
+    /// decrypting every file. A stolen backup leaks titles, not conversations.
     private var registryURL: URL { root.appending(path: "registry.json") }
 
     private func sessionURL(_ id: String) -> URL {
@@ -92,7 +100,13 @@ public actor SessionStore {
         try ensureRoot()
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
-        try encoder.encode(session).write(to: sessionURL(session.id), options: .atomic)
+        let body: Data
+        if let keys {
+            body = try SessionCrypto.seal(try encoder.encode(session), using: try keys.key())
+        } else {
+            body = try encoder.encode(session)
+        }
+        try body.write(to: sessionURL(session.id), options: .atomic)
 
         var entries = try list().filter { $0.id != session.id }
         entries.append(Entry(
@@ -106,7 +120,20 @@ public actor SessionStore {
 
     public func load(id: String) throws -> StoredSession? {
         guard let data = try? Data(contentsOf: sessionURL(id)) else { return nil }
-        return try? JSONDecoder().decode(StoredSession.self, from: data)
+        guard let keys else {
+            return try? JSONDecoder().decode(StoredSession.self, from: data)
+        }
+        if SessionCrypto.isSealed(data) {
+            guard let opened = try? SessionCrypto.open(data, using: try keys.key()) else { return nil }
+            return try? JSONDecoder().decode(StoredSession.self, from: opened)
+        }
+        // Legacy plaintext body from before encryption. Decode as today, then rewrite
+        // sealed so the next launch is already migrated. A failed rewrite still returns
+        // the session. A corrupt body fails the decode and returns nil, never a throw
+        // into the UI.
+        guard let session = try? JSONDecoder().decode(StoredSession.self, from: data) else { return nil }
+        try? save(session)
+        return session
     }
 
     /// Renames one saved session. The name is trimmed; an empty (or whitespace-only)

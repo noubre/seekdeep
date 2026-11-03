@@ -20,6 +20,9 @@ final class ChatViewModel: ObservableObject {
     @Published private(set) var lastSentPrompt: String?
     /// Up/↓ prompt history for the composer.
     @Published private(set) var recall = PromptRecall()
+    /// Set before `start()` when transcript encryption could not be set up (Keychain
+    /// denied or failed). Banners once the view exists; that launch's store is plaintext.
+    private(set) var firstLaunchWarning: String?
 
     private let transport: any WorkletTransport
     private let client: RPCClient
@@ -29,10 +32,11 @@ final class ChatViewModel: ObservableObject {
     /// Room topic -> when the transcript started, so a reopened session keeps its date.
     private var sessionStart: [String: Date] = [:]
 
-    init(transport: any WorkletTransport, sessionStore: SessionStore) {
+    init(transport: any WorkletTransport, sessionStore: SessionStore, firstLaunchWarning: String? = nil) {
         self.transport = transport
         self.client = RPCClient(transport: transport)
         self.store = sessionStore
+        self.firstLaunchWarning = firstLaunchWarning
     }
 
     deinit {
@@ -41,6 +45,9 @@ final class ChatViewModel: ObservableObject {
     }
 
     func start() async {
+        if let warning = firstLaunchWarning {
+            banner(warning, kind: "slash-error")
+        }
         AppLog.note("starting worker")
         do {
             try await client.start()

@@ -7,9 +7,21 @@ struct SeekDeepApp: App {
 
     init() {
         let root = (try? WorkletHost.storageRoot()) ?? FileManager.default.temporaryDirectory
+        // Encrypt saved transcripts at rest. A Keychain failure is not silent: the
+        // store stays plaintext for this launch and the view model banners the reason
+        // once the view exists.
+        var keys: SessionKeyProviding? = KeychainSessionKey()
+        var firstLaunchWarning: String?
+        do {
+            _ = try keys?.key()
+        } catch {
+            keys = nil
+            firstLaunchWarning = "Saved transcripts will not be encrypted this launch: \(error.localizedDescription)"
+        }
         _model = StateObject(wrappedValue: ChatViewModel(
             transport: WorkletHost.makeTransport(storageRoot: root),
-            sessionStore: SessionStore(root: root.appending(path: "sessions"))
+            sessionStore: SessionStore(root: root.appending(path: "sessions"), keys: keys),
+            firstLaunchWarning: firstLaunchWarning
         ))
     }
 
