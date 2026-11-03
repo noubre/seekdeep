@@ -50,6 +50,10 @@ targets:
         com.apple.security.cs.allow-unsigned-executable-memory: true
         com.apple.security.network.client: true
         com.apple.security.network.server: true
+        # The bare addons are prebuilt frameworks signed by the Holepunch team. An ad-hoc
+        # signed host therefore fails library validation on launch in Release, so the
+        # exception is required until the addons are re-signed with our own identity.
+        com.apple.security.cs.disable-library-validation: true
     dependencies:
       - package: SeekDeepCore
       - package: BareKit
@@ -66,6 +70,12 @@ targets:
         - name: Pack
           script: |
             set -e
+            # bare-pack does NOT parse its input: a file with an unbalanced brace packs
+            # happily and fails only when the worklet boots. Check syntax first, or a
+            # broken worklet ships inside a green build.
+            node --check ${PWD}/worklet/backend.js
+            node --check ${PWD}/worklet/worklet.js
+            node --check ${PWD}/worklet/pipe-adapter.js
             PATH="${PATH}" "${PWD}/node_modules/.bin/bare-pack" --preset darwin --linked --base ${PWD} --out ${PWD}/app/app.bundle ${PWD}/worklet/backend.js
             test -s "${PWD}/app/app.bundle"
   SeekDeepTests:

@@ -3347,7 +3347,19 @@ Expected: a commit count ≥ the number of tasks completed, and a push that ends
 
 ## Phase 6 — parity verification and cutover
 
-### Task 6.1 — Interop harness (scripted, no UI)
+> **Scope change (user decision, pre-release):** cross-version interop is **out of scope**.
+> The app is still in early development and every user will install the new build, so no
+> peer will ever be running the Electron renderer against a native one. Tasks below are
+> kept for the record; 6.1's *interop* purpose is dropped (the script still earns its keep
+> as the fastest proof that the JS core boots and streams after our changes), and the
+> "joined a JS-hosted room" checkbox in 6.4 is deleted. Reintroduce it only if a version is
+> ever released to users who will not upgrade.
+
+### Task 6.1 — Core smoke harness (scripted, no UI)
+
+**Not an interop test** (see the scope note above): two JS peers on a loopback DHT prove the
+core still boots, joins and streams after the port — cheap, and it catches a broken
+`js/**` edit before Xcode is ever involved.
 
 `scripts/parity.sh` — the JS half of the acceptance test. It also proves the core still
 works after all the JS/JS-edits of Phases 0–1:
@@ -3405,8 +3417,8 @@ notes.
 - [ ] `npm test` green: `All 47 test files passed.`
 - [ ] `npm run native:core` green on a clean clone (`core/.build` deleted).
 - [ ] `npm run native:app` produces an app that boots the worklet (no `node` child).
-- [ ] Joined a JS-hosted room (`./scripts/parity.sh` topic), streamed a reply, switched
-      to collaborative, saw the peer's prompt appear in both clients.
+- [ ] ~~Joined a JS-hosted room~~ — dropped with interop; instead: two native instances
+      join one topic and see each other's prompts in collaborative mode.
 - [ ] `/p2p help`, `/models`, `/p2p drive create` round-trip from the composer.
 - [ ] Saved history survives relaunch; export produces valid Markdown.
 - [ ] App runs with Ollama stopped (shows the "no provider" state, does not crash).
