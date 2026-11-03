@@ -14,8 +14,9 @@ document in the same commit as the code.
 | 0.5 BareKit embedding proof | 0.5 | **done** (`ff9ce8c`) — app boots the worklet and answers RPC |
 | 1. The worklet | 1.1–1.4 | **done**, with the deviations noted at each task |
 | 2. `SeekDeepCore` | 2.1–2.10 | **done** (`e228ae3`…`855b316`) — 66 swift tests, 0 failures |
-| 3. SwiftUI shell | 3.1 | **done** — package + test target wired, `xcodebuild test` green |
-| 3.2–7 | — | not started; the `BareTransport` snippet is corrected below |
+| 3. SwiftUI shell + chat MVP | 3.1–3.5 | **done** (`e77b56d`) — window, room, streamed answer |
+| 4. Fidelity | — | next |
+| 5–7 | — | not started |
 
 Deviations from the code below that actually shipped are called out inline as
 **As built:** notes. Trust those over the original snippet.
@@ -2914,6 +2915,65 @@ If the stream arrives but never completes, `done` is being dropped: check
 `ChatReducer`'s `.response` handling — the JS sets `done: true` with an empty chunk.
 
 Commit: `feat(app): verified against JS host`
+
+---
+
+### Phase 3 — as built
+
+The chat MVP is live: the window opens, `chat.create` makes a room, models list, and a
+prompt streams into a bubble. Verified headlessly end to end — the app, its own transport,
+the real JS worker and a fake provider, with no human at the keyboard:
+
+```
+[seekdeep] transport: node process (dev), args=["--ollama-url=http://127.0.0.1:11999"]
+[seekdeep] starting worker
+[seekdeep] spawning node worklet/dev.js --stdio --storage=… --ollama-url=…
+[seekdeep] transport started
+[seekdeep] worker ready, room=39f216c1fd2c…6dc19
+[seekdeep] response done: error=none, assistant=70 chars
+```
+
+`SEEKDEEP_AUTOSEND="say hi in five words"` drives composer → `chat.send` → stream →
+`ChatReducer`; the fake provider (`scripts/e2e-worklet.mjs` + a tiny NDJSON server) makes
+it repeatable without pulling a 4 GB model.
+
+Corrections to the tasks above, all of them a compile error, a hang or a blank screen
+first:
+
+1. **`ProcessTransport` lives in the core, not the app.** Foundation-only, so `swift test`
+   boots the real worker (`WorkletIntegrationTests`, 4 tests, `XCTSkip` when
+   `worklet/dev.js` is missing). It takes `repositoryRoot:` and `additionalArguments:`.
+2. **`SEEKDEEP_WORKLET_ARGS`** (space separated) forwards worker flags from `WorkletHost`,
+   which is how the app points at a fake provider or a loopback DHT.
+3. **xcodegen does not define `DEBUG`.** Without
+   `settings.configs.Debug.SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG`, `#if DEBUG` is dead
+   code and the app silently uses the embedded transport.
+4. **Never derive the repo root from `#filePath`.** Xcode compiles package sources with
+   *relative* paths, so `URL(fileURLWithPath: #filePath)` resolved to `/Users/nate` and the
+   `Process` started in a directory that does not exist. `findRepositoryRoot(startingAt:)`
+   walks up looking for `worklet/dev.js` instead.
+5. **`MarkdownBlock` is the real name** (not `MarkdownBlocks`), with
+   `.bulletList([String])` and `.code(String)` — no language payload; SwiftUI colours code
+   from the palette.
+6. **A blank app is window-state restoration, not layout.** macOS restores the previous
+   window under an identifier SwiftUI derives from the view tree; after the probe build was
+   replaced the restore failed (`restoreWindowWithIdentifier … window=0x0`) and SwiftUI
+   opened nothing at all. Fix: `NSQuitAlwaysKeepsWindows: false`, and the dev launcher
+   `scripts/run-native-app.sh` kills with `SIGKILL`, deletes
+   `~/Library/Saved Application State/to.seekdeep.native.savedState`, and passes
+   `-ApplePersistenceIgnoreState YES`.
+7. **`MessageList` scrolls on content length**, not on the last id: a streaming chunk keeps
+   the message id and only grows its text.
+8. **Screenshots are unavailable in this environment.** `screencapture` needs Screen
+   Recording and `CGWindowListCreateImage` is obsoleted in macOS 15. Verify with
+   `CGWindowListCopyWindowInfo` (window exists + bounds) plus stderr logs, and ask the user
+   to look.
+
+Commands added: `npm run native:dev:app` (clean-state launch), `npm run native:e2e`
+(worker + fake provider, asserts `STREAM_OK`).
+
+Known, not fixed: the Release build fails to launch because the signed frameworks and the
+ad-hoc binary disagree about Team ID. That is Phase 5 (signing), not a code defect.
 
 ---
 
