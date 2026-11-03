@@ -79,7 +79,11 @@ public enum RPCFrame: Equatable, Sendable {
         guard !id.isEmpty, id.utf8.count <= 64 else { throw RPCFrameError.malformed("bad id") }
         guard !method.isEmpty else { throw RPCFrameError.malformed("bad method") }
         let payload = JSONValue.object(["id": .string(id), "method": .string(method), "params": .object(params)])
-        var data = try JSONEncoder().encode(payload)
+        // Sorted keys make the wire bytes deterministic, which is worth far more than the
+        // microseconds it costs: a captured frame can be compared byte for byte.
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        var data = try encoder.encode(payload)
         data.append(0x0A)
         return data
     }

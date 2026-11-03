@@ -6,10 +6,11 @@ final class RPCFrameTests: XCTestCase {
         let data = try RPCFrame.encodeRequest(id: "7", method: "chat.send", params: ["prompt": .str("hi")])
         XCTAssertEqual(data.last, 0x0A)
         let text = String(decoding: data.dropLast(), as: UTF8.self)
-        let object = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any]
-        XCTAssertEqual(Set(object?.keys.map { $0 } ?? []), ["id", "method", "params"])
-        XCTAssertEqual(object?["id"] as? String, "7")
-        XCTAssertEqual(object?["method"] as? String, "chat.send")
+        let parsed = try JSONSerialization.jsonObject(with: Data(text.utf8))
+        let object = try XCTUnwrap(parsed as? [String: Any])
+        XCTAssertEqual(Set(object.keys), Set(["id", "method", "params"]))
+        XCTAssertEqual(object["id"] as? String, "7")
+        XCTAssertEqual(object["method"] as? String, "chat.send")
     }
 
     func testDecodesResponse() throws {
