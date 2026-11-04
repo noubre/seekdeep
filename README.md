@@ -128,52 +128,6 @@ Before running SeekDeep, make sure you have:
    - **Provider Switching**: Switch between Ollama and LM Studio at runtime
    - **Model Sync**: When connected to peers, model lists sync from the host's active provider
 
-### Terminal UI (TUI)
-
-For a no-window, zero-dependency client, run the same worker backend in-process
-over an in-memory pipe and render it in the terminal:
-
-```bash
-npm run tui
-# or
-node tui.js
-```
-
-Flags (all optional, invalid values are ignored):
-
-| Flag | Effect |
-|------|--------|
-| `--storage=<abs path>` | Hyperdrive/Localdrive root (default `~/.seekdeep`, or `SEEKDEEP_STORAGE`) |
-| `--model=<name>` | Pre-select a model |
-| `--provider=ollama\|lmstudio` | Pre-select a provider |
-| `--topic=<64hex>` | Join that room instead of creating a new one |
-| `--harness-key=<64hex>` | Sync the plugin harness from a remote key |
-| `--no-color` | Disable ANSI color (also honours `NO_COLOR`) |
-| `--local-dht[=<port>]`, `--bootstrap=host:port` | Point Hyperswarm at a loopback/known DHT |
-| `--ollama-url=…`, `--lmstudio-url=…` | Override provider base URLs |
-
-TUI-local commands (these never leave the process):
-
-| Command | Effect |
-|---------|--------|
-| `/tui` | List the TUI-local commands |
-| `/status` | Print role, topic, peer count, provider, and model |
-| `/models` | List the provider's models |
-| `/model <name\|index>` | Select a model by name or 1-based index |
-| `/provider <name>` | Switch provider (`ollama` or `lmstudio`; host only) |
-| `/join <64hex topic>` | Join a room |
-| `/leave` | Leave the current room |
-| `/clear` | Clear the message store (and the screen on a TTY) |
-| `/quit`, `/exit` | Exit |
-
-Every other `/…` input (`/p2p`, `/swarm`, `/drive`, `/localdrive`, `/mirror`,
-`/beam`, `/harness`, `/bot`, …) is forwarded verbatim to the plugin harness, so
-the TUI exposes the full desktop command set. Plain text is sent to the host
-LLM once a model is selected (`/models` then `/model <name>`).
-
-Replies stream token by token; input is paused while a response generates, so
-keystrokes typed mid-stream are dropped.
-
 ### Plugin Harness
 
 SeekDeep is a plugin-based harness. All slash commands run in the Bare worker, where
@@ -431,7 +385,6 @@ SeekDeep is built with a modern modular ES6 architecture for maintainability and
 seekdeep/
 ├── js/                    # Modular JavaScript architecture
 │   ├── main.js            # Main application bootstrap
-│   ├── tui/               # Terminal client: args, in-memory pipe, renderer, app
 │   ├── harness/           # Plugin harness: loader, SDK, sync, bot wiring
 │   ├── slash/             # Slash parser, runtime, and command tags
 │   ├── p2p/               # Bare worker services, RPC, and bot service
@@ -456,7 +409,6 @@ seekdeep/
 ├── app/                   # SwiftUI app (views, view model, transports)
 ├── plugins/               # Built-in harness plugins (p2p-core, harness-sync, bot)
 ├── server.js              # Optional standalone server component
-├── tui.js                 # Terminal UI entrypoint (separate from the desktop app)
 ├── package.json           # Project configuration and dependencies
 ├── lib/                   # External libraries
 │   └── marked.min.js      # Markdown parser

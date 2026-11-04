@@ -1,5 +1,6 @@
 /**
- * Client-side room state: the TUI still projects chat events through it.
+ * Client-side room state projector (js/session/client-state.js): maps chat events
+ * onto collaborative/peer state; this test is its remaining consumer.
  */
 import test from 'brittle';
 

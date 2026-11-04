@@ -3,7 +3,7 @@
  *
  * Launch-argument and fetch resolution, the process shutdown latch, and the
  * bridge's no-local-providers stub live here so `index.js`, `server.js`,
- * `bridge.js`, and `tui.js` do not each carry their own copy.
+ * and `bridge.js` do not each carry their own copy.
  */
 
 /**

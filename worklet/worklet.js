@@ -1,8 +1,8 @@
 /**
  * Boot the unmodified SeekDeep worker backend over a duplex byte stream.
  *
- * tui.js proves this is legal outside Pear: pass `config.storage` explicitly and inject
- * an `fs`. Everything else is the same code path the desktop app uses.
+ * worklet/dev.js proves this is legal outside Pear: pass `config.storage` explicitly and
+ * inject an `fs`. Everything else is the same code path the desktop app uses.
  */
 import path from 'path'                     // Bare resolves its builtin; Node resolves node:path
 import { createPipeAdapter } from './pipe-adapter.js'

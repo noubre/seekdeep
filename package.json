@@ -20,7 +20,6 @@
     "index.js",
     "index.html",
     "server.js",
-    "tui.js",
     "bridge.js",
     "js/",
     "plugins/",
@@ -31,7 +30,6 @@
     "README.md"
   ],
   "scripts": {
-    "tui": "node tui.js",
     "bridge": "node bridge.js",
     "test": "node scripts/run-tests.mjs",
     "check:deps": "node scripts/check-dependencies.mjs",
