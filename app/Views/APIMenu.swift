@@ -3,8 +3,12 @@ import SwiftUI
 
 /// The OpenAI-compatible endpoint toggle.
 ///
-/// Both modes serve the same HTTP surface (`js/openai/http-server.js`); they differ only
-/// in who runs the model — this Mac's providers, or the room's host reached over the DHT.
+/// One endpoint, one job: it turns this app into an OpenAI/Anthropic-shaped door onto the
+/// room. Every request is forwarded over the DHT to whoever is the room's host, which
+/// answers from its own providers — this Mac when it is the host, a remote machine when it
+/// is a peer. That is how Claude Code, Codex, Hermes or the OpenAI SDK can use the room's
+/// inference without a plugin or any P2P code of their own: they just point their base URL
+/// here.
 struct APIMenu: View {
     @ObservedObject var model: ChatViewModel
     @State private var port = 8080
@@ -29,7 +33,7 @@ struct APIMenu: View {
         }
         .menuStyle(.borderlessButton)
         .disabled(!model.isReady)
-        .help(model.api.running ? "OpenAI endpoint running at \(model.api.url ?? "")" : "Serve an OpenAI-compatible endpoint")
+        .help(model.api.running ? "OpenAI endpoint running at \(model.api.url ?? "")" : "Serve an OpenAI-compatible endpoint onto the room")
     }
 
     private var isValidPort: Bool {
@@ -39,7 +43,7 @@ struct APIMenu: View {
     /// While a server is listening: the URL to point clients at, plus Stop.
     private var runningControls: some View {
         Group {
-            Section("Running — \(model.api.mode ?? "api")") {
+            Section("Running — the room host's models") {
                 if let url = model.api.url {
                     Text(url)
                         .font(.system(size: 11, design: .monospaced))
@@ -61,23 +65,14 @@ struct APIMenu: View {
         }
     }
 
-    /// While stopped: one entry per mode, each saying who runs the model, plus the
-    /// port and the optional API key both modes share.
+    /// While stopped: what the endpoint does, the port and optional API key, and Start.
     private var startControls: some View {
         Group {
-            Section("Server — this Mac runs the model") {
-                Text("Answers from the providers set up on this machine (Ollama, LM Studio).")
+            Section("OpenAI endpoint — the room host's models") {
+                Text("Point Claude Code, Codex, Hermes or any OpenAI client at this URL. Requests are forwarded over the room to whoever is the host; nothing needs installing on that client.")
                     .font(.system(size: 11))
-                Button("Start Server") {
-                    Task { await model.startAPI(mode: "server", port: port, apiKey: apiKey) }
-                }
-                .disabled(!isValidPort)
-            }
-            Section("Bridge — a remote host runs the model") {
-                Text("Forwards each request over the room to whoever is the host.")
-                    .font(.system(size: 11))
-                Button("Start Bridge") {
-                    Task { await model.startAPI(mode: "bridge", port: port, apiKey: apiKey) }
+                Button("Start endpoint") {
+                    Task { await model.startAPI(port: port, apiKey: apiKey) }
                 }
                 .disabled(!isValidPort)
             }

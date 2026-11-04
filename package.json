@@ -19,7 +19,6 @@
   "files": [
     "index.js",
     "index.html",
-    "server.js",
     "bridge.js",
     "js/",
     "plugins/",

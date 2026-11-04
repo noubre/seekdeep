@@ -169,7 +169,7 @@ const METHOD_SPECS = Object.freeze({
   }),
   api: (service) => ({
     'api.start': {
-      optional: ['mode', 'host', 'port', 'apiKey', 'model'],
+      optional: ['host', 'port', 'apiKey', 'model'],
       validators: {
         // `defineRpcMethod` treats every listed key as a string unless overridden, so
         // the port is coerced (and range-checked) here or an integer param is rejected.

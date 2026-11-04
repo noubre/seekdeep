@@ -63,15 +63,13 @@ final class ChatViewModel: ObservableObject {
             await reloadSessions()
             isReady = true
             #if DEBUG
-            // Smoke hook: `SEEKDEEP_API="server:8080"` (or "bridge:8080") starts the OpenAI
-            // surface from the environment so the packed Bare path can be exercised without a
-            // human clicking the menu. Debug builds only.
+            // Smoke hook: `SEEKDEEP_API="8080"` (or the older "bridge:8080" form) starts the
+            // OpenAI surface from the environment so the packed Bare path can be exercised
+            // without a human clicking the menu. Debug builds only.
             if let api = ProcessInfo.processInfo.environment["SEEKDEEP_API"], !api.isEmpty {
-                let parts = api.split(separator: ":", maxSplits: 1).map(String.init)
-                let mode = parts.first ?? "server"
-                let port = parts.count > 1 ? (Int(parts[1]) ?? 8080) : 8080
-                AppLog.note("smoke: starting API mode=\(mode) port=\(port)")
-                await startAPI(mode: mode, port: port)
+                let port = api.split(separator: ":").last.flatMap { Int($0) } ?? 8080
+                AppLog.note("smoke: starting API port=\(port)")
+                await startAPI(port: port)
             }
             // Smoke hook: `SEEKDEEP_AUTOSEND="say hi"` exercises composer -> worker ->
             // reducer without a human at the keyboard.
@@ -138,8 +136,8 @@ final class ChatViewModel: ObservableObject {
         api = APIStatus(json: response) ?? .off
     }
 
-    func startAPI(mode: String, port: Int = 8080, apiKey: String = "") async {
-        var params: [String: JSONValue] = ["mode": .str(mode), "port": .number(Double(port))]
+    func startAPI(port: Int = 8080, apiKey: String = "") async {
+        var params: [String: JSONValue] = ["port": .number(Double(port))]
         let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         if !key.isEmpty { params["apiKey"] = .str(key) }
         do {

@@ -217,84 +217,58 @@ two harnesses cannot loop. The bot is opt-in.
 
   ```
 
-### Desktop App as Host/Server
+### Two different things: the room, and the local endpoint
 
-The desktop app has built-in server capabilities, which means:
+They are often confused, so they are spelled out separately. Only the room moves inference
+between machines.
 
-1. You can run the desktop app as either a host or a peer
-2. When running as a host, other peers can connect to your instance directly
-3. No separate server component is required for most use cases
-4. The standalone server is primarily useful for headless environments or remote machines
+**The room (P2P).** This is how another SeekDeep app uses this machine's models.
 
-When you start the app, it automatically runs in host mode until you join an existing chat.
+| You are | How you get there | Who answers your prompts |
+|---|---|---|
+| Host | the desktop app does this on launch; the topic key is in the join bar | this Mac's Ollama / LM Studio |
+| Peer | paste a 64-hex topic key into the join bar and press Join | the room's host |
 
-### Running the Server
+Peers receive the host's provider and model list on the handshake and again whenever the host
+switches provider. See *Provider and Model Sharing Between Host and Peers* below.
 
-The server component makes your local LLM providers accessible over P2P:
+**The local endpoint (HTTP on loopback).** This is how a *non-SeekDeep* harness — Claude Code,
+Codex, Hermes, the OpenAI SDK — uses the room's inference without a plugin, without any P2P
+code, and without knowing what a topic key is: it points its base URL at `http://127.0.0.1:<port>/v1`
+and speaks the OpenAI or Anthropic wire format. SeekDeep translates each request into a room
+request, forwards it to the host, and streams the answer back.
 
-1. **Make sure at least one LLM provider is running:**
+Start it from the **API** menu in the top bar (*Start endpoint*, with a port and an optional
+API key), or headlessly:
 
-   **For Ollama:**
-   ```bash
-   ollama serve
-   ollama run deepseek-r1:1.5b
-   ```
+```bash
+node bridge.js --topic=<64-hex topic of the room> [--http-port=8080] [--api-key=sk-…]
+```
 
-   **For LM Studio:**
-   - Start LM Studio with a loaded model and local server enabled
+On the room's host the same path answers locally, so there is only one endpoint mode: it always
+serves whoever holds the models — this Mac when it is the host, a remote machine when it is a
+peer.
 
-2. **Start the server:**
-   ```bash
-   node server.js
-   ```
-
-3. **Server Features:**
-   - Auto-detects available providers (Ollama and/or LM Studio)
-   - Proxies requests to the appropriate provider
-   - Displays the public key for P2P identification
-   - Supports switching between providers if multiple are available
-
-> **Note**: The server app is optional and only needed when you want to connect to a remote machine where you can't run the desktop app directly. The desktop app can act as both a client and server/host without requiring the separate server component.
-
-### OpenAI-compatible endpoint
-
-Both `server.js` and `bridge.js` expose an OpenAI/Anthropic-compatible HTTP surface,
-so any client that speaks those wire formats (Claude Code, Codex, Hermes, the OpenAI
-SDK) can use a machine's GPU inference.
-
-The desktop app can serve the same surface without dropping to the CLI: the **API**
-menu in the top bar starts it as **Server** (this Mac runs the model) or **Bridge**
-(forward to the room's host), with a port, an optional API key, and a copyable base
-URL while it runs.
-
-- `node server.js` serves the endpoints on `127.0.0.1:8080` backed directly by the
-  host's local provider.
-- `node bridge.js --topic=<64-hex topic from the host>` joins the room as a peer and
-  serves the same endpoints on its own loopback port, forwarding every request over
-  the DHT room to the host and streaming the answer back.
-
-Routes (both `http://host:port/...` and `http://host:port/v1/...` base URLs work):
+Routes (`http://host:port/...` and `http://host:port/v1/...` base URLs both work):
 `POST /v1/chat/completions`, `POST /v1/completions`, `POST /v1/messages`,
 `POST /v1/messages/count_tokens`, `POST /v1/responses`, `GET /v1/models`.
 
 ```bash
-# host (http://127.0.0.1:8080/v1) prints the topic and the base URL
-node server.js --local-dht=40001
-
-# bridge (http://127.0.0.1:8081/v1) joins the same room
+# on the machine with the GPU: the desktop app is the host; copy the topic key from the join bar
+# on a second machine: join that room and serve a local endpoint for its harnesses
 node bridge.js --local-dht=40001 --topic=<topic from the host> --http-port=8081 --api-key=sk-test
 
-# point a client at it
+# point the harness at the endpoint
 curl -sN http://127.0.0.1:8081/v1/chat/completions \
   -H 'Authorization: Bearer sk-test' -H 'Content-Type: application/json' \
   -d '{"model":"qwen3","messages":[{"role":"user","content":"reply with exactly: ok"}]}'
 ```
 
-Flags: `--http-port`, `--http-host` (default `127.0.0.1`), `--api-key` (any bearer
-accepted when unset), `--model` (pin a model), `--no-http`. Multi-turn messages and
-tool definitions/results survive the round trip on every route. Auth is off by
-default; widening `--http-host` without `--api-key` exposes the host's GPU to the
-network.
+Flags: `--topic` (required — the room to join), `--http-port`, `--http-host` (default
+`127.0.0.1`), `--api-key` (any bearer accepted when unset), `--model` (pin a model),
+`--no-http`, plus the usual `--local-dht` / `--bootstrap`. Multi-turn messages and tool
+definitions/results survive the round trip on every route. Auth is off by default; widening
+`--http-host` without `--api-key` exposes the room's GPU to the network.
 
 ### Provider and Model Selection
 
@@ -408,7 +382,6 @@ seekdeep/
 │       └── history.js     # Chat history
 ├── app/                   # SwiftUI app (views, view model, transports)
 ├── plugins/               # Built-in harness plugins (p2p-core, harness-sync, bot)
-├── server.js              # Optional standalone server component
 ├── package.json           # Project configuration and dependencies
 ├── lib/                   # External libraries
 │   └── marked.min.js      # Markdown parser

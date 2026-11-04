@@ -2,11 +2,14 @@
 /**
  * SeekDeep OpenAI bridge.
  *
- * Joins an existing SeekDeep room as a peer and serves an OpenAI/Anthropic
- * compatible endpoint on loopback. Each HTTP request is forwarded over the DHT
- * room to the host, which answers from its local LLM provider; the streamed
- * answer is relayed back, including tool calls. This lets several clients on
- * several machines share one machine's GPU inference.
+ * The proxy that lets an ordinary AI harness — Claude Code, Codex, Hermes, the OpenAI SDK —
+ * use a SeekDeep room's inference without a plugin and without knowing anything about the
+ * P2P network. It serves an OpenAI/Anthropic-compatible endpoint on loopback, resolves every
+ * request into a room request over the DHT, and streams the host's answer back, including
+ * tool calls. The harness only ever sees a base URL.
+ *
+ * Joins an existing room as a peer, so the machine with the models runs SeekDeep as the host
+ * (the desktop app, or the headless host). One room, many harnesses, one GPU.
  *
  * Usage:
  *   node bridge.js --topic=<64-hex topic from the host>
@@ -50,7 +53,7 @@ try {
   const joined = await service.methods['chat.join']({ topic: httpArgs.topic });
   console.log('SeekDeep OpenAI bridge');
   console.log(`Joined topic: ${joined.topic}`);
-  console.log('Note: the host must run SeekDeep with chat bridge support.');
+  console.log('Forwarding over the room: the host answers with its own providers.');
 
   if (httpArgs.http) {
     server = await createHttpServer({

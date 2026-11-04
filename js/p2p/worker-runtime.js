@@ -90,7 +90,7 @@ async function createWorkerBackend(pipe, options = {}) {
   // The OpenAI surface is optional: Node callers pass `node:http`, the packed Bare
   // worklet passes `bare-http1`, and a backend built without either simply has no API.
   const apiService = options.http
-    ? createApiService({ providers: options.providers, chatService, http: options.http })
+    ? createApiService({ chatService, http: options.http })
     : null;
   const harness = options.harness || (options.disableHarness
     ? null

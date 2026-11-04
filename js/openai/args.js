@@ -1,5 +1,5 @@
 /**
- * Parse the HTTP-surface arguments shared by `server.js` and `bridge.js`.
+ * Parse the HTTP-surface arguments used by `bridge.js`.
  *
  * Lenient like `parseBootstrapArgs`: an invalid value is ignored so a typo
  * never crashes startup; the effective configuration is printed at boot.

@@ -1,83 +1,11 @@
 /**
- * HTTP backends for the OpenAI surface.
+ * The HTTP backend for the OpenAI surface.
  *
- * `createHostBackend` answers from the process-local provider router (used by
- * `server.js`). `createP2PBackend` forwards each request over the DHT chat room
- * to the host (used by `bridge.js`). Both expose the same
- * `{ listModels, complete }` shape consumed by `http-server.js`.
+ * `createP2PBackend` forwards each request over the DHT chat room to the host, which
+ * answers from its own providers — locally when this node is the host, remotely when it
+ * is a peer. It exposes the `{ listModels, complete }` shape consumed by
+ * `http-server.js`.
  */
-
-function createHostBackend({ providers, model = null }) {
-  let active = null;
-
-  async function resolveActive() {
-    if (active) return active;
-    if (typeof providers.autoSelect === 'function') {
-      try {
-        active = await providers.autoSelect();
-        return active;
-      } catch { /* fall through to the first declared provider */ }
-    }
-    active = Array.isArray(providers.providers) && providers.providers.length ? providers.providers[0] : null;
-    return active;
-  }
-
-  async function listModels() {
-    const provider = await resolveActive();
-    if (!provider || typeof providers.listModels !== 'function') return [];
-    try {
-      const list = await providers.listModels(provider);
-      if (!Array.isArray(list)) return [];
-      return list.map((entry) => {
-        const mapped = { id: entry.id, name: entry.name };
-        if (entry.created !== undefined) mapped.created = entry.created;
-        return mapped;
-      });
-    } catch {
-      return [];
-    }
-  }
-
-  function complete(request, sink) {
-    let cancelled = false;
-    // No AbortController on Bare. Without one we cannot abort the provider at
-    // the fetch layer; `cancelled` still stops delivery, so the stream ends
-    // where the caller stopped listening. Same tradeoff as chat-service.js.
-    const controller = typeof AbortController === 'function' ? new AbortController() : null;
-
-    (async () => {
-      const provider = await resolveActive();
-      if (cancelled) return;
-      if (!provider || typeof providers.chat !== 'function') {
-        sink.error(new Error('No local LLM provider is available'));
-        return;
-      }
-      const params = { messages: request.messages, tools: request.tools || [] };
-      if (controller) params.signal = controller.signal;
-      if (request.temperature !== undefined) params.temperature = request.temperature;
-      if (request.maxTokens !== undefined) params.maxTokens = request.maxTokens;
-      if (request.stop !== undefined) params.stop = request.stop;
-      try {
-        const result = await providers.chat(provider, model ?? request.model, params, (event) => {
-          if (cancelled) return;
-          if (event.type === 'text') sink.text(event.text);
-          else if (event.type === 'tool_call') sink.toolCall({ index: event.index, id: event.id, name: event.name, argumentsDelta: event.argumentsDelta });
-        });
-        if (cancelled) return;
-        sink.done({ finishReason: result?.finishReason, usage: result?.usage });
-      } catch (error) {
-        if (!cancelled) sink.error(error);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      try { controller?.abort(); } catch { /* ignore */ }
-    };
-  }
-
-  return Object.freeze({ listModels, complete });
-}
 
 function createP2PBackend({ service, model = null, modelTimeoutMs = 10000 }) {
   let models = [];
@@ -151,4 +79,4 @@ function createP2PBackend({ service, model = null, modelTimeoutMs = 10000 }) {
   return Object.freeze({ listModels, complete });
 }
 
-export { createHostBackend, createP2PBackend };
+export { createP2PBackend };
